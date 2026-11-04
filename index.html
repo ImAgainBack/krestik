@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ru" translate="no">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="google" content="notranslate" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#f5f1e8" />
+    <meta
+      name="description"
+      content="Схемы для вышивки крестом — работайте даже без интернета."
+    />
+    <title>Крестик</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles-modes.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="#home" aria-label="Крестик, на главную"
+        ><span class="brand-mark" aria-hidden="true">✳</span
+        ><span>Крестик<small>схемы для вышивки крестом</small></span></a
+      >
+      <button class="button primary" id="new-project">Новая вышивка</button>
+    </header>
+    <main id="app">
+      <section class="screen" id="home-screen">
+        <div class="hero">
+          <p class="eyebrow">ВЫШИВАЙТЕ В ЛЮБОМ МЕСТЕ</p>
+          <h1>Создавайте<br />свои схемы.</h1>
+          <p>Превратите изображение в схему для вышивки крестом.</p>
+        </div>
+        <div class="section-heading">
+          <h2>Мои схемы</h2>
+          <span id="project-count">0 схем</span>
+        </div>
+        <div id="project-list" class="project-list"></div>
+        <div id="empty-state" class="empty-state">
+          <span class="empty-icon" aria-hidden="true">＋</span>
+          <h3>Первая вышивка?</h3>
+          <p>Выберите изображение, чтобы создать схему.</p>
+          <button class="button primary" id="empty-create">
+            Создать схему
+          </button>
+        </div>
+      </section>
+      <section class="screen hidden" id="wizard-screen">
+        <button class="back-button" data-screen="home">← Мои схемы</button>
+        <div class="stepper">
+          <b>1 · Изображение</b><span>2 · Настройки</span><span>3 · Вышивка</span>
+        </div>
+        <h1 id="wizard-heading">Новая вышивка</h1>
+        <label class="field"
+          >Название схемы<input
+            id="project-name"
+            maxlength="60"
+            value="Моя вышивка"
+        /></label>
+        <div class="upload-options">
+          <label class="upload-card"
+            ><span aria-hidden="true">◎</span><b>Сделать снимок</b
+            ><small>Открыть камеру</small
+            ><input
+              id="camera-input"
+              type="file"
+              accept="image/*"
+              capture="environment"
+          /></label>
+          <label class="upload-card"
+            ><span aria-hidden="true">▧</span><b>Выбрать изображение</b
+            ><small>Из галереи</small
+            ><input id="gallery-input" type="file" accept="image/*"
+          /></label>
+        </div>
+        <div id="editor" class="editor hidden">
+          <h2>Обрезать изображение</h2>
+          <p class="muted">Переместите углы области вышивки.</p>
+          <div class="crop-shell">
+            <canvas id="crop-canvas" aria-label="Обрезка изображения"></canvas
+            ><canvas
+              id="magnifier"
+              class="magnifier"
+              width="120"
+              height="120"
+            ></canvas>
+          </div>
+          <div class="segmented">
+            <label
+              ><input type="radio" name="mode" value="chart" checked /> Готовая схема</label
+            ><label
+              ><input type="radio" name="mode" value="photo" /> По фотографии</label
+            >
+          </div>
+          <button class="button secondary wide" id="detect-grid">
+            Найти сетку
+          </button>
+          <p id="grid-detection" class="muted" aria-live="polite"></p>
+          <div class="field-grid">
+            <label class="field"
+              >Столбцы<input
+                id="cols"
+                type="number"
+                min="1"
+                max="400"
+                value="40" /></label
+            ><label class="field"
+              >Строки<input
+                id="rows"
+                type="number"
+                min="1"
+                max="400"
+                value="40"
+            /></label>
+          </div>
+          <p id="physical-size" class="muted"></p>
+          <p id="stitch-count" class="muted"></p>
+          <label class="toggle-row"
+            ><input id="lock-ratio" type="checkbox" checked /> Сохранить пропорции</label
+          >
+          <div class="field">
+            <label for="aida">Канва Аида</label
+            ><select id="aida">
+              <option value="11">11 клеток на дюйм</option>
+              <option value="14" selected>14 клеток на дюйм</option>
+              <option value="16">16 клеток на дюйм</option>
+              <option value="18">18 клеток на дюйм</option>
+            </select>
+          </div>
+          <label class="field"
+            >Максимум цветов <output id="max-colors-out">24</output
+            ><input id="max-colors" type="range" min="2" max="80" value="24"
+          /></label>
+          <label id="legend-row" class="field hidden">Коды DMC из ключа схемы (необязательно)
+            <textarea id="legend-codes" rows="2" placeholder="699 702 704 603 602 604 742 B5200"></textarea>
+          </label>
+          <div id="legend-swatches" class="legend-swatches" aria-live="polite"></div>
+          <label id="dither-row" class="field"
+            >Смешивание цветов фотографии
+            <input id="dither" type="range" min="0" max="100" value="35"
+          /></label>
+          <label class="toggle-row"
+            ><input id="empty-background" type="checkbox" checked /> Сделать фон пустой канвой</label
+          >
+          <label class="field"
+            >Удаление одиночных крестиков
+            <input id="cleanup" type="range" min="0" max="3" value="1"
+          /></label>
+          <label class="toggle-row"
+            ><input id="only-stock" type="checkbox" /> Использовать только мои нитки</label
+          >
+          <div id="live-preview" class="live-preview" aria-live="polite"><span id="preview-summary"></span><canvas id="preview-canvas" aria-label="Предварительный просмотр схемы"></canvas><div id="preview-palette"></div></div>
+          <button class="button primary wide" id="create-pattern">
+            Создать схему
+          </button>
+        </div>
+      </section>
+      <section class="screen hidden" id="stitch-screen">
+        <div class="stitch-top"><button class="back-button" data-screen="home">←</button><b id="stitch-title"></b><span id="progress-label">0%</span></div>
+        <div class="progress-track"><span id="progress-bar"></span></div>
+        <div class="board-wrap">
+          <canvas
+            id="stitch-canvas"
+            aria-label="Схема для вышивки, нажмите, чтобы отметить крестик"
+          ></canvas>
+        </div>
+        <div class="check-hint hidden" id="check-hint" aria-live="polite">Режим отметок · Нажимайте на клетки готовых крестиков</div>
+        <div class="toolbar">
+          <button class="button secondary toolbar-button" id="check-toggle" aria-pressed="false"><span aria-hidden="true">✓</span><small>Перемещение</small></button>
+          <label class="toolbar-button display-control"><span aria-hidden="true">◉</span><small>Вид</small><select id="display-mode" aria-label="Вид">
+              <option value="both">Всё</option>
+              <option value="symbols">Символы</option>
+              <option value="colors">Цвета</option>
+            </select></label>
+          <button class="button secondary toolbar-button" id="color-filter-open"><span aria-hidden="true">◍</span><small>Цвет</small></button>
+          <button class="button secondary toolbar-button" id="undo"><span aria-hidden="true">↶</span><small>Отменить</small></button>
+          <button class="button secondary toolbar-button" id="open-palette"><span aria-hidden="true">▦</span><small>Палитра</small></button>
+        </div>
+        <div id="palette-panel" class="palette-panel hidden"><div class="palette-panel-head"><b>Палитра DMC</b><button id="palette-filter-toggle" class="button secondary">Фильтр</button><button id="close-palette" class="button secondary">Закрыть</button><button class="text-button" id="open-inventory">Мои нитки</button></div><label id="palette-filter-wrap" class="field hidden">Фильтр по цвету<select id="color-filter" aria-label="Фильтр по цвету"><option value="">Все</option></select></label><div id="palette-list" class="palette-list"></div></div>
+        <button id="export-png" class="hidden">Экспорт PNG</button>
+        <div id="print-pages" aria-hidden="true"></div>
+        <button class="button secondary wide" id="print-pattern">
+          Печать / PDF
+        </button>
+      </section>
+      <section class="screen hidden" id="inventory-screen">
+        <button class="back-button" data-screen="stitch">← Вышивать</button>
+        <h1>Мои нитки DMC</h1>
+        <input
+          id="inventory-search"
+          class="search"
+          placeholder="Код или название цвета"
+        />
+        <div class="inventory-controls">
+          <select id="inventory-filter">
+            <option value="all">Все цвета</option>
+            <option value="owned">Есть в запасе</option>
+            <option value="missing">Нет в запасе</option></select
+          ><button class="button secondary" id="toggle-all">Отметить все</button>
+        </div>
+        <div id="inventory-list" class="inventory-list"></div>
+      </section>
+    </main>
+    <nav class="bottom-nav" aria-label="Навигация">
+      <a href="#home">⌂ <span>Схемы</span></a
+      ><button id="nav-create">＋ <span>Создать</span></button
+      ><button id="nav-stitch">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 4h16v16H4zM9 4v16M15 4v16M4 9h16M4 15h16" /></svg
+        ><span>Вышивать</span>
+      </button>
+    </nav>
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
