@@ -554,6 +554,8 @@ async function startCamera() {
 }
 function cameraFailure() { stopCamera(); $("#camera-message").textContent = "Камера недоступна. Выберите фотографию из телефона"; $("#camera-shutter").classList.add("hidden"); $("#camera-file-fallback").classList.remove("hidden"); }
 let pendingUpdate = false;
+let updateRetryTimer = null;
+let updateRetries = 0;
 let boardGestureActive = false;
 $("#stitch-canvas").addEventListener("pointerdown", () => { boardGestureActive = true; });
 $("#stitch-canvas").addEventListener("pointerup", () => { boardGestureActive = false; if (pendingUpdate && $("#check-toggle")?.getAttribute("aria-pressed") !== "true") activateUpdate(); });
@@ -568,10 +570,19 @@ async function activateUpdate() {
   // Croix pas encore écrites dans IndexedDB : on réessaie dans un instant plutôt que de recharger.
   if (stitchBusy()) {
     pendingUpdate = true;
+    clearTimeout(updateRetryTimer);
+    // ~10 s sans réussir à enregistrer : on cesse d'attendre et on le dit (les données restent à l'écran).
+    if (++updateRetries > 20) {
+      updateRetries = 0;
+      $("#update-banner span").textContent = "Не удалось сохранить — сохраните копию в файл, затем обновите";
+      return;
+    }
     $("#update-banner span").textContent = "Сохраняем вышивку, затем обновим";
-    setTimeout(activateUpdate, 500);
+    updateRetryTimer = setTimeout(activateUpdate, 500);
     return;
   }
+  clearTimeout(updateRetryTimer);
+  updateRetries = 0;
   pendingUpdate = false;
   const registration = await navigator.serviceWorker.getRegistration();
   if (registration?.waiting) {
