@@ -7,15 +7,16 @@ import {
   saveSetting,
 } from "./storage.js";
 import { estimateSkeins } from "./engine/index.js";
-import { $, $$, makeId } from "./ui/dom.js";
+import { $, $$, escapeHtml, makeId, showDialog } from "./ui/dom.js";
 import { renderProjects } from "./ui/projects.js";
 import { readImageFile } from "./ui/import.js";
 import { setupCrop } from "./ui/crop.js";
 import { setupSettings } from "./ui/settings.js";
 import { renderPalette } from "./ui/palette.js";
 import { setupInventory } from "./ui/inventory.js";
-import { createStitchView } from "./ui/stitch.js";
+import { createStitchView, isBusy as stitchBusy } from "./ui/stitch.js";
 import { exportPattern, printPattern } from "./ui/export.js";
+import { dmcNameRu } from "./i18n/dmc-names-ru.js";
 
 const worker = new Worker("./js/worker.js", { type: "module" });
 const requests = new Map();
@@ -30,6 +31,9 @@ let manualReplacements = new Map();
 let importSession = false;
 let manualModeVersion = 0;
 let photoCropInitialized = false;
+let cameraStream = null;
+let cameraFileFallback = false;
+let draftTimer = 0;
 
 worker.addEventListener("message", ({ data }) => {
   const pending = requests.get(data.id);
@@ -54,11 +58,13 @@ function renderScreen(screen) {
     element.classList.toggle("hidden", element.id !== `${screen}-screen`),
   );
   if (screen !== "stitch") stitch.closeOverlays?.({ fromHistory: true });
+  if (screen !== "wizard") stopCamera();
   window.scrollTo(0, 0);
 }
 function showScreen(screen, { replace = false } = {}) {
   if (screen === activeScreen) return;
-  history[replace ? "replaceState" : "pushState"]({ pointCroix: true, screen }, "", `${location.pathname}${location.search}#${screen}`);
+  const hash = screen === "stitch" && currentProject ? "#stitch/" + currentProject.id : "#" + screen;
+  history[replace ? "replaceState" : "pushState"]({ pointCroix: true, screen, projectId: currentProject?.id }, "", `${location.pathname}${location.search}${hash}`);
   renderScreen(screen);
 }
 window.addEventListener("popstate", (event) => {
@@ -69,7 +75,10 @@ window.addEventListener("popstate", (event) => {
     stitch.openOverlay?.({ fromHistory: true });
     return;
   }
-  const screen = event.state?.pointCroix ? event.state.screen : location.hash.slice(1);
+  const route = location.hash.slice(1).split("/");
+  const screen = event.state?.pointCroix ? event.state.screen : route[0];
+  const projectId = event.state?.projectId || route[1];
+  if (screen === "stitch" && projectId && currentProject?.id !== projectId) { openProject(projectId, { replace: true }); return; }
   if (["home", "wizard", "stitch", "inventory"].includes(screen)) {
     handlingHistory = true;
     renderScreen(screen);
@@ -79,7 +88,9 @@ window.addEventListener("popstate", (event) => {
 });
 window.addEventListener("hashchange", () => {
   if (handlingHistory) return;
-  const screen = location.hash.slice(1);
+  const route = location.hash.slice(1).split("/");
+  const screen = route[0];
+  if (screen === "stitch" && route[1] && currentProject?.id !== route[1]) { openProject(route[1], { replace: true }); return; }
   if (["home", "wizard", "stitch", "inventory"].includes(screen) && screen !== activeScreen) renderScreen(screen);
 });
 function selectedMode() {
@@ -94,7 +105,7 @@ function settings() {
     rows,
     maxColors: Number($("#max-colors").value),
     aida: Number($("#aida").value),
-    dither: Number($("#dither").value) / 100,
+    dither: $("#dither").checked ? 0.35 : 0,
     emptyBackground: $("#empty-background").checked,
     cleanup: Number($("#cleanup").value),
     quad: crop.getQuad(),
@@ -122,6 +133,7 @@ const settingsUI = setupSettings({
   getOptions: settings,
   calculate: async (image, options) => ask("convert", { image, options }),
 });
+crop.onChange(() => { settingsUI.schedule(); persistDraft(); });
 
 async function refreshProjects() {
   projects = await allProjects();
@@ -145,29 +157,92 @@ function startNew() {
   excludedCodes = new Set();
   manualReplacements = new Map();
   settingsUI.setDetected(false);
-  $("#project-name").value = "Моя вышивка";
+  $("#step-label").textContent = "Шаг 1 из 2";
+  $("#project-name").value = "Вышивка " + new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" }).format(new Date());
   $("#editor").classList.add("hidden");
+  $("#upload-options").classList.remove("hidden");
+  $("#loaded-source").classList.add("hidden");
   $("#camera-input").value = "";
   $("#gallery-input").value = "";
   showScreen("wizard");
 }
+function persistDraft() {
+  if (!sourceBlob) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(flushDraft, 120);
+}
+async function flushDraft() {
+  if (!sourceBlob) return;
+  clearTimeout(draftTimer); draftTimer = 0;
+  const draft = { source: sourceBlob, thumbnail, name: $("#project-name").value, mode: selectedMode(), settings: settings() };
+  await saveSetting("draft", draft);
+  renderDraftCard(draft);
+}
+window.addEventListener("pagehide", flushDraft);
+document.addEventListener("visibilitychange", () => { if (document.hidden) flushDraft(); });
+function renderDraftCard(draft) {
+  const card = $("#draft-card");
+  if (!draft?.source) { card.classList.add("hidden"); card.replaceChildren(); return; }
+  const preview = typeof draft.thumbnail === "string" && draft.thumbnail.startsWith("data:image/") ? draft.thumbnail : "";
+  card.innerHTML = `<h2>Продолжить начатую вышивку?</h2><div class="draft-content">${preview ? `<img src="${escapeHtml(preview)}" alt="Предварительный просмотр начатой вышивки">` : ""}<div><b>${escapeHtml(draft.name || "Вышивка")}</b><p>Работа ещё не закончена</p></div></div><div class="draft-actions"><button class="button primary" data-action="continue">Продолжить</button><button class="button secondary danger-text" data-action="delete">Удалить</button></div>`;
+  card.classList.remove("hidden");
+  card.onclick = async (event) => {
+    const action = event.target.closest("[data-action]")?.dataset.action;
+    if (action === "continue") await restoreDraft(draft);
+    if (action === "delete") {
+      const result = await showDialog({ title: "Удалить начатую вышивку?", message: "Фотография и настройки будут удалены.", actions: [{ value: "cancel", label: "Отмена" }, { value: "delete", label: "Удалить", danger: true }] });
+      if (result.value === "delete") { await saveSetting("draft", null); renderDraftCard(null); }
+    }
+  };
+}
+async function restoreDraft(draft) {
+  // Comme startNew : la création remplacera l'assistant dans l'historique (sinon « retour » y ramène).
+  importSession = true;
+  showScreen("wizard");
+  $("#project-name").value = draft.name || "Вышивка";
+  await loadFile(new File([draft.source], "черновик.jpg", { type: draft.source.type || "image/jpeg" }));
+  thumbnail = draft.thumbnail || thumbnail;
+  if (draft.settings) {
+    settingsUI.selectMode(draft.mode === "chart" ? "chart" : "photo");
+    $("#cols").value = String(draft.settings.cols || 40); $("#rows").value = String(draft.settings.rows || 40);
+    $("#max-colors").value = String(draft.settings.maxColors || 20); $("#max-colors-out").value = $("#max-colors").value;
+    $("#aida").value = String(draft.settings.aida || 14); $("#dither").checked = Number(draft.settings.dither || 0) > 0;
+    $("#empty-background").checked = Boolean(draft.settings.emptyBackground); $("#cleanup").value = String(draft.settings.cleanup ?? 1);
+    if (draft.settings.quad) crop.setQuad(draft.settings.quad);
+    $("#legend-codes").value = (draft.settings.allowedCodes || []).join(" ");
+    settingsUI.schedule(); persistDraft();
+  }
+  $("#editor").scrollIntoView({ block: "start" });
+}
+$("#wizard-screen").addEventListener("input", persistDraft);
+$("#wizard-screen").addEventListener("change", persistDraft);
 async function loadFile(file) {
   const startingModeVersion = manualModeVersion;
   try {
     const loaded = await readImageFile(file);
     currentImage = loaded.image;
     sourceBlob = loaded.source;
+    $("#step-label").textContent = "Шаг 2 из 2";
+    crop.setRectangular(selectedMode() === "photo");
+    $("#upload-options").classList.add("hidden");
+    $("#loaded-source").classList.remove("hidden");
     // L'éditeur doit être visible avant de dessiner : sinon le canvas mesure 0 px de large.
     $("#editor").classList.remove("hidden");
     await crop.setImage(sourceBlob);
     photoCropInitialized = false;
     settingsUI.setPhotoDimensions(loaded.image.width, loaded.image.height);
     thumbnail = await createThumbnail(sourceBlob);
+    $("#loaded-thumbnail").src = thumbnail;
+    await saveSetting("draft", { source: sourceBlob, thumbnail, name: $("#project-name").value, mode: selectedMode(), settings: settings() });
+    renderDraftCard({ source: sourceBlob, thumbnail, name: $("#project-name").value, mode: selectedMode(), settings: settings() });
     settingsUI.schedule();
     await detectGridBounds(true, startingModeVersion);
+    persistDraft();
     $("#editor").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
-    alert(ru.errors.readImage);
+    $("#upload-options").classList.remove("hidden");
+    $("#loaded-source").classList.add("hidden");
+    await showDialog({ title: "Не удалось открыть изображение", message: "Выберите фотографию или схему в формате изображения", actions: [{ value: "ok", label: "Понятно" }] });
   }
 }
 async function detectGridBounds(automatic = false, startingModeVersion = manualModeVersion) {
@@ -250,7 +325,7 @@ async function makePattern() {
     const pattern = await patternWithReplacements(currentImage, settings());
     const project = {
       id: makeId(),
-      name: $("#project-name").value.trim() || "Моя вышивка",
+      name: $("#project-name").value.trim() || ("Вышивка " + new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" }).format(new Date())),
       source: sourceBlob,
       thumbnail,
       settings: settings(),
@@ -261,19 +336,22 @@ async function makePattern() {
       updated: Date.now(),
     };
     await saveProject(project);
+    await saveSetting("draft", null);
+    renderDraftCard(null);
     await refreshProjects();
     openProject(project.id);
   } catch (error) {
-    alert(ru.errors.createGrid);
+    await showDialog({ title: "Не удалось создать схему", message: "Попробуйте выбрать другое изображение или изменить настройки", actions: [{ value: "ok", label: "Понятно" }] });
   } finally {
     $("#create-pattern").disabled = false;
-    $("#create-pattern").textContent = "Создать схему";
+    $("#create-pattern").textContent = "Готово — показать схему";
   }
 }
 async function openProject(id, { replace = false } = {}) {
   currentProject =
     projects.find((project) => project.id === id) || (await findProject(id));
   if (!currentProject) return;
+  await saveSetting("lastProjectId", currentProject.id);
   currentImage = null;
   sourceBlob = currentProject.source;
   excludedCodes = new Set(currentProject.excludedCodes || []);
@@ -297,40 +375,65 @@ async function renderProjectPalette() {
         2,
       )),
     onAction: async (action, code, replacement) => {
-      if (action === "highlight") return;
+      if (action === "highlight") { stitch.closeOverlays(); return; }
       if (action === "replace") {
-        manualReplacements.set(code, replacement);
-        currentProject.replacements = [...manualReplacements];
-        currentProject.pattern = await ask("replace", {
-          pattern: currentProject.pattern,
-          from: code,
-          to: replacement,
-        });
+        const confirm = await showDialog({ title: "Заменить цвет?", message: `Цвет ${code} будет заменён на ${replacement}.`, actions: [{ value: "cancel", label: "Отмена" }, { value: "confirm", label: "Заменить", danger: true }] });
+        if (confirm.value !== "confirm") return;
       }
-      if (action === "exclude") {
-        excludedCodes.add(code);
-        currentProject.excludedCodes = [...excludedCodes];
-        currentImage = await imageFromBlob(currentProject.source);
-        currentProject.pattern = await patternWithReplacements(currentImage, {
-          ...currentProject.settings,
-          allowedCodes: (currentProject.settings.allowedCodes || allDmcCodes).filter((item) => !excludedCodes.has(item)),
-        });
-      }
-      currentProject.updated = Date.now();
-      await saveProject(currentProject);
-      await refreshProjects();
-      stitch.open(currentProject);
-      renderProjectPalette();
-      stitch.openOverlay({ fromHistory: true });
+      const previousPattern = structuredClone(currentProject.pattern);
+      const previousReplacements = [...manualReplacements];
+      const actions = $$("#palette-list .palette-actions button");
+      actions.forEach((button) => { button.disabled = true; });
+      const status = $("#palette-status");
+      try {
+        if (action === "replace") {
+          manualReplacements.set(code, replacement);
+          currentProject.replacements = [...manualReplacements];
+          currentProject.pattern = await ask("replace", { pattern: currentProject.pattern, from: code, to: replacement });
+        }
+        if (action === "exclude") {
+          status.textContent = "Пересчитываем…";
+          excludedCodes.add(code);
+          currentProject.excludedCodes = [...excludedCodes];
+          currentImage = await imageFromBlob(currentProject.source);
+          currentProject.pattern = await patternWithReplacements(currentImage, {
+            ...currentProject.settings,
+            allowedCodes: (currentProject.settings.allowedCodes || allDmcCodes).filter((item) => !excludedCodes.has(item)),
+          });
+        }
+        currentProject.updated = Date.now();
+        await saveProject(currentProject);
+        await refreshProjects();
+        stitch.open(currentProject);
+        renderProjectPalette();
+        stitch.openOverlay({ fromHistory: true });
+        if (action === "exclude" || action === "replace") {
+          const choice = await showDialog({ title: action === "exclude" ? "Схема пересчитана" : "Цвет заменён", message: "Уже отмеченные крестики остались на своих местах.", actions: [{ value: "undo", label: action === "exclude" ? "Отменить" : "Отменить замену" }, { value: "done", label: "Готово" }] });
+          if (choice.value === "undo") {
+            if (action === "exclude") { excludedCodes.delete(code); currentProject.excludedCodes = [...excludedCodes]; }
+            else { manualReplacements = new Map(previousReplacements); currentProject.replacements = previousReplacements; }
+            currentProject.pattern = previousPattern;
+            await saveProject(currentProject); await refreshProjects(); stitch.open(currentProject); renderProjectPalette(); stitch.openOverlay({ fromHistory: true });
+          }
+        }
+      } catch (error) {
+        if (action === "exclude") { excludedCodes.delete(code); currentProject.excludedCodes = [...excludedCodes]; currentProject.pattern = previousPattern; }
+        status.textContent = "Не удалось пересчитать схему";
+        throw error;
+      } finally { actions.forEach((button) => { button.disabled = false; }); if (status?.textContent === "Пересчитываем…") status.textContent = ""; }
     },
   });
+  $("#palette-color-filter").innerHTML = `<option value="">Все цвета</option>` + currentProject.pattern.colors.map(item => `<option value="${escapeHtml(item.code)}">${escapeHtml(item.code)} · ${escapeHtml(dmcNameRu(item.code, item.name))}</option>`).join("");
+  $("#palette-display-mode").value = stitch.getDisplayMode?.() || "all";
+  $("#palette-color-filter").value = stitch.getColorFilter?.() || "";
 }
 $("#new-project").addEventListener("click", startNew);
-$("#empty-create").addEventListener("click", startNew);
-$("#nav-create").addEventListener("click", startNew);
+$("#nav-create")?.addEventListener("click", startNew);
+$("#choose-other-photo").addEventListener("click", () => { $("#upload-options").classList.remove("hidden"); $("#loaded-source").classList.add("hidden"); });
 $("#camera-input").addEventListener("change", (event) =>
   loadFile(event.target.files[0]),
 );
+$("#camera-input").addEventListener("click", (event) => { if (cameraFileFallback) { cameraFileFallback = false; return; } event.preventDefault(); startCamera(); });
 $("#gallery-input").addEventListener("change", (event) =>
   loadFile(event.target.files[0]),
 );
@@ -338,6 +441,7 @@ $("#create-pattern").addEventListener("click", makePattern);
 $("#detect-grid").addEventListener("click", () => detectGridBounds(false));
 $$('input[name="mode"]').forEach(input => input.addEventListener("change", () => {
   manualModeVersion++;
+  crop.setRectangular(input.value === "photo" && input.checked);
   if (input.checked && input.value === "photo" && !photoCropInitialized) {
     crop.resetQuad();
     photoCropInitialized = true;
@@ -348,12 +452,22 @@ $("#open-inventory").addEventListener("click", async () => {
   showScreen("inventory");
 });
 $("#export-png").addEventListener("click", () => exportPattern(currentProject));
+$("#palette-export-png").addEventListener("click", () => currentProject && exportPattern(currentProject));
+$("#palette-print").addEventListener("click", () => currentProject && printPattern(currentProject));
+$("#palette-display-mode").addEventListener("change", event => {
+  if (stitch.setDisplayMode) stitch.setDisplayMode(event.target.value);
+  else { $("#display-mode").value = event.target.value === "all" ? "both" : event.target.value; $("#display-mode").dispatchEvent(new Event("change", { bubbles: true })); }
+});
+$("#palette-color-filter").addEventListener("change", event => {
+  if (stitch.setColorFilter) stitch.setColorFilter(event.target.value || null);
+  else { $("#color-filter").value = event.target.value; $("#color-filter").dispatchEvent(new Event("change", { bubbles: true })); }
+});
 $("#print-pattern").addEventListener("click", () =>
   printPattern(currentProject),
 );
-$("#nav-stitch").addEventListener("click", () => {
+$("#nav-stitch").addEventListener("click", async () => {
   if (currentProject) showScreen("stitch");
-  else alert(ru.errors.openProject);
+  else if (projects.length) openProject(await getSetting("lastProjectId", projects[0].id));
 });
 $$('a[href^="#"]').forEach((link) => link.addEventListener("click", (event) => {
   const screen = link.getAttribute("href").slice(1);
@@ -379,15 +493,95 @@ async function initialize() {
   const codes = await import("./engine/dmc.js");
   codes.DMC.forEach(([code]) => allDmcCodes.push(code));
   await refreshProjects();
-  const initialRoute = location.hash.slice(1);
-  if (initialRoute === "stitch" && projects.length) {
-    history.replaceState({ pointCroix: true, screen: "stitch" }, "", `${location.pathname}${location.search}#stitch`);
-    await openProject(projects[0].id, { replace: true });
+  const route = location.hash.slice(1).split("/");
+  if (route[0] === "stitch" && projects.length) {
+    const lastId = route[1] || await getSetting("lastProjectId", projects[0].id);
+    const target = projects.find((project) => project.id === lastId) || projects[0];
+    if (target) {
+      history.replaceState({ pointCroix: true, screen: "stitch", projectId: target.id }, "", `${location.pathname}${location.search}#stitch/${target.id}`);
+      await openProject(target.id, { replace: true });
+    } else renderScreen("home");
   } else {
     history.replaceState({ pointCroix: true, screen: "home" }, "", `${location.pathname}${location.search}#home`);
     renderScreen("home");
   }
+  if (route[0] !== "stitch") renderDraftCard(await getSetting("draft", null));
   if ("serviceWorker" in navigator)
     navigator.serviceWorker.register("./sw.js").catch(() => {});
+  bindBackup();
 }
+
+async function bindBackup() {
+  try {
+    const backup = await import("./ui/backup.js");
+    const ready = await backup.ensurePersistence();
+    $("#backup-export").addEventListener("click", () => backup.exportBackup());
+    $("#backup-import").addEventListener("click", () => $("#backup-file").click());
+    $("#backup-file").addEventListener("change", async (event) => { const file = event.target.files?.[0]; if (!file) return; try { const result = await backup.importBackup(file); await refreshProjects(); await showDialog({ title: "Копия открыта", message: `Добавлено вышивок: ${result.imported}`, actions: [{ value: "ok", label: "Понятно" }] }); } catch { await showDialog({ title: "Не удалось открыть копию", message: "Проверьте, что выбран файл копии приложения", actions: [{ value: "ok", label: "Понятно" }] }); } finally { event.target.value = ""; } });
+    document.body.dataset.persistence = String(ready);
+  } catch { document.body.dataset.persistence = "unavailable"; }
+}
+function stopCamera() { cameraStream?.getTracks().forEach((track) => track.stop()); cameraStream = null; }
+async function startCamera() {
+  let dialog = $("#camera-dialog");
+  if (!dialog) {
+    dialog = document.createElement("dialog"); dialog.id = "camera-dialog";
+    dialog.innerHTML = `<form method="dialog" class="camera-form"><h2>Сфотографировать</h2><p id="camera-message">Наведите камеру на картинку или схему</p><div class="camera-frame"><video id="camera-video" autoplay playsinline></video><canvas id="camera-capture" class="hidden"></canvas><span class="camera-guide hidden">Поместите схему в рамку</span></div><div class="camera-actions"><button type="button" class="button secondary" id="camera-cancel">Отмена</button><button type="button" class="button primary" id="camera-shutter">Сфотографировать</button><button type="button" class="button secondary hidden" id="camera-retake">Переснять</button><button type="button" class="button primary hidden" id="camera-accept">Подходит</button><button type="button" class="button secondary hidden" id="camera-file-fallback">Выбрать файл</button></div></form>`;
+    document.body.append(dialog);
+    $("#camera-cancel").onclick = () => { stopCamera(); dialog.close(); };
+    $("#camera-file-fallback").onclick = () => { dialog.close(); cameraFileFallback = true; $("#camera-input").click(); };
+    $("#camera-shutter").onclick = async () => {
+      try {
+        let blob;
+        if (window.ImageCapture && cameraStream?.getVideoTracks()[0]) blob = await new ImageCapture(cameraStream.getVideoTracks()[0]).takePhoto();
+        else { const video = $("#camera-video"), canvas = $("#camera-capture"); canvas.width = video.videoWidth; canvas.height = video.videoHeight; canvas.getContext("2d").drawImage(video, 0, 0); blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", .94)); }
+        window.cameraPhoto = blob; stopCamera(); $("#camera-video").classList.add("hidden"); $("#camera-capture").classList.remove("hidden");
+        const bitmap = await createImageBitmap(blob); const c = $("#camera-capture"); c.width = bitmap.width; c.height = bitmap.height; c.getContext("2d").drawImage(bitmap,0,0); bitmap.close();
+        $("#camera-shutter").classList.add("hidden"); $("#camera-retake").classList.remove("hidden"); $("#camera-accept").classList.remove("hidden");
+      } catch { cameraFailure(); }
+    };
+    $("#camera-retake").onclick = async () => { $("#camera-capture").classList.add("hidden"); $("#camera-video").classList.remove("hidden"); $("#camera-retake").classList.add("hidden"); $("#camera-accept").classList.add("hidden"); $("#camera-shutter").classList.remove("hidden"); try { cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }); $("#camera-video").srcObject = cameraStream; } catch { cameraFailure(); } };
+    $("#camera-accept").onclick = async () => { const photo = window.cameraPhoto; dialog.close(); if (photo) await loadFile(new File([photo], "снимок.jpg", { type: photo.type || "image/jpeg" })); };
+    dialog.addEventListener("close", stopCamera);
+  }
+  window.cameraPhoto = null;
+  $("#camera-capture").classList.add("hidden"); $("#camera-video").classList.remove("hidden");
+  $("#camera-shutter").classList.remove("hidden"); $("#camera-retake").classList.add("hidden"); $("#camera-accept").classList.add("hidden"); $("#camera-file-fallback").classList.add("hidden");
+  $("#camera-message").textContent = "Наведите камеру на картинку или схему";
+  dialog.showModal();
+  try { cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }); $("#camera-video").srcObject = cameraStream; $("#camera-message").textContent = selectedMode() === "chart" ? "Поместите схему в рамку" : "Наведите камеру и нажмите кнопку"; $(".camera-guide").classList.toggle("hidden", selectedMode() !== "chart"); }
+  catch { cameraFailure(); }
+}
+function cameraFailure() { stopCamera(); $("#camera-message").textContent = "Камера недоступна. Выберите фотографию из телефона"; $("#camera-shutter").classList.add("hidden"); $("#camera-file-fallback").classList.remove("hidden"); }
+let pendingUpdate = false;
+let boardGestureActive = false;
+$("#stitch-canvas").addEventListener("pointerdown", () => { boardGestureActive = true; });
+$("#stitch-canvas").addEventListener("pointerup", () => { boardGestureActive = false; if (pendingUpdate && $("#check-toggle")?.getAttribute("aria-pressed") !== "true") activateUpdate(); });
+$("#stitch-canvas").addEventListener("pointercancel", () => { boardGestureActive = false; if (pendingUpdate && $("#check-toggle")?.getAttribute("aria-pressed") !== "true") activateUpdate(); });
+$("#check-toggle").addEventListener("click", () => { if (pendingUpdate && $("#check-toggle").getAttribute("aria-pressed") !== "true" && !boardGestureActive) activateUpdate(); });
+async function activateUpdate() {
+  if (boardGestureActive || $("#check-toggle")?.getAttribute("aria-pressed") === "true") {
+    pendingUpdate = true;
+    $("#update-banner span").textContent = "Обновление установится после завершения вышивки";
+    return;
+  }
+  // Croix pas encore écrites dans IndexedDB : on réessaie dans un instant plutôt que de recharger.
+  if (stitchBusy()) {
+    pendingUpdate = true;
+    $("#update-banner span").textContent = "Сохраняем вышивку, затем обновим";
+    setTimeout(activateUpdate, 500);
+    return;
+  }
+  pendingUpdate = false;
+  const registration = await navigator.serviceWorker.getRegistration();
+  if (registration?.waiting) {
+    navigator.serviceWorker.addEventListener("controllerchange", () => location.reload(), { once: true });
+    registration.waiting.postMessage({ type: "KRESTIK_ACTIVATE_UPDATE" });
+  } else location.reload();
+}
+if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", (event) => {
+  if (event.data?.type !== "KRESTIK_UPDATE_AVAILABLE") return;
+  const banner = $("#update-banner"); banner.classList.remove("hidden");
+  $("#update-apply").onclick = activateUpdate;
+});
 initialize();

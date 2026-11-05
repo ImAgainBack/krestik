@@ -1,6 +1,17 @@
-import { $, escapeHtml } from "./dom.js";
+// Public createStitchView API retained; draw schedules a frame.
+// Both named exports and view methods: setDisplayMode(mode), getDisplayMode()
+// mode: 'all' | 'colors' | 'symbols'; setColorFilter(code|null), getColorFilter().
+// isBusy(): true while marking mode, gestures, or unsaved work require staying here.
+let currentView;
+export const setDisplayMode = mode => currentView?.setDisplayMode(mode);
+export const getDisplayMode = () => currentView?.getDisplayMode() ?? 'all';
+export const setColorFilter = code => currentView?.setColorFilter(code);
+export const getColorFilter = () => currentView?.getColorFilter() ?? null;
+export const isBusy = () => currentView?.isBusy() ?? false;
+import { $ } from "./dom.js";
 import { symbolFor } from "./symbols.js";
-import { ru, formatNumber } from "../i18n/ru.js";
+import { stitchRu, stitchProgress } from "../i18n/ru-stitch.js";
+import { onSaveStatus, reportSaveStatus, exportBackup, setBackupProjectProvider } from "./backup.js";
 
 export function createStitchView({ save, getSkeins }) {
   const canvas = $("#stitch-canvas");
@@ -15,12 +26,35 @@ export function createStitchView({ save, getSkeins }) {
   let gesture = null;
   let touched = new Set();
   let gestureCheck = null;
-  let paintMode = false;
   let filterCode = null;
   let saveTimer;
-  let showMode = "both";
-  let lastTap = 0;
+  let showMode = "all";
+  let zoomHintShown = false;
+  let total = 0;
+  let frame = 0;
+  let dirty = false;
+  let saving = null;
+  let pendingSaves = 0;
+  onSaveStatus(status => {
+    const label = $("#stitch-save-status");
+    label.textContent = stitchRu[status];
+    label.classList.toggle("save-error", status === "error");
+    $("#stitch-backup").classList.toggle("hidden", status !== "error");
+  });
 
+  setBackupProjectProvider(() => project ? structuredClone({...project, checked: [...checked], updated: Date.now()}) : null);
+  $("#stitch-backup").addEventListener('click', () => exportBackup());
+  function setDisplayMode(mode) {
+    if (!['all', 'colors', 'symbols'].includes(mode)) return;
+    showMode = mode;
+    if ($("#display-mode")) $("#display-mode").value = mode;
+    draw();
+  }
+  function setColorFilter(code) {
+    filterCode = code || null;
+    if ($("#color-filter")) $("#color-filter").value = filterCode || '';
+    draw();
+  }
   function symbolColor(hex) {
     const value = hex.startsWith("#") ? hex.slice(1) : hex;
     const channels = [0, 2, 4].map((index) => {
@@ -36,7 +70,8 @@ export function createStitchView({ save, getSkeins }) {
     const button = $("#check-toggle");
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
-    button.querySelector("small").textContent = active ? ru.mark : ru.move;
+    button.setAttribute("aria-checked", String(active));
+    button.querySelector("small").textContent = stitchRu.paint;
     $("#check-hint").classList.toggle("hidden", !active);
   }
 
@@ -44,10 +79,10 @@ export function createStitchView({ save, getSkeins }) {
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
     const base = Math.max(
-      0.25,
+      0.001,
       Math.min(
-        (width - 42) / project.pattern.cols,
-        (height - 42) / project.pattern.rows,
+        (width - 56) / project.pattern.cols,
+        (height - 48) / project.pattern.rows,
       ),
     );
     const size = base * zoom;
@@ -60,8 +95,27 @@ export function createStitchView({ save, getSkeins }) {
     };
   }
   function draw() {
+    if (!frame) frame = requestAnimationFrame(() => { frame = 0; render(); });
+  }
+  function boundPan() {
+    const g = geometry();
+    const boundX = g.width / 2 + g.size * project.pattern.cols * .2;
+    const boundY = g.height / 2 + g.size * project.pattern.rows * .2;
+    panX = Math.max(-boundX, Math.min(boundX, panX));
+    panY = Math.max(-boundY, Math.min(boundY, panY));
+  }
+  function zoomAt(next, x, y) {
+    const before = zoom, base = geometry().size / zoom;
+    zoom = Math.max(1, Math.min(Math.max(1, 56 / base), next));
+    panX = x - canvas.clientWidth / 2 - (x - canvas.clientWidth / 2 - panX) * zoom / before;
+    panY = y - canvas.clientHeight / 2 - (y - canvas.clientHeight / 2 - panY) * zoom / before;
+    boundPan(); draw();
+  }
+  function render() {
     if (!project?.pattern) return;
     canvas.dataset.zoom = String(zoom);
+    canvas.dataset.panX = String(panX);
+    canvas.dataset.panY = String(panY);
     const dpr = window.devicePixelRatio || 1;
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
@@ -105,12 +159,12 @@ export function createStitchView({ save, getSkeins }) {
             ? "#f5f1e8"
             : filterCode && color?.code !== filterCode
               ? "#e5e4de"
-              : color.hex.startsWith("#")
+              : showMode === "symbols" ? "#fffdf8" : color.hex.startsWith("#")
                 ? color.hex
                 : `#${color.hex}`;
         context.fillRect(x, y, size, size);
         if (showMode !== "colors" && color && size >= 9) {
-          context.fillStyle = symbolColor(color.hex.startsWith("#") ? color.hex : `#${color.hex}`);
+          context.fillStyle = showMode === "symbols" ? "#000" : symbolColor(color.hex.startsWith("#") ? color.hex : `#${color.hex}`);
           context.font = `700 ${Math.min(14, size * 0.65)}px sans-serif`;
           context.textAlign = "center";
           context.textBaseline = "middle";
@@ -148,7 +202,7 @@ export function createStitchView({ save, getSkeins }) {
     }
     context.restore();
     context.fillStyle = "#6d6b60";
-    context.font = "11px sans-serif";
+    context.font = "12px sans-serif";
     context.textAlign = "center";
     for (let col = Math.max(10, Math.ceil(firstCol / 10) * 10); col <= Math.min(project.pattern.cols, lastCol); col += 10) {
       const rawX = left + (col - 0.5) * size;
@@ -166,30 +220,37 @@ export function createStitchView({ save, getSkeins }) {
     updateProgress();
   }
   function updateProgress() {
-    const total = project.pattern.cells.reduce(
-      (count, value) => count + (value === 0xffff ? 0 : 1),
-      0,
-    );
-    const done = [...checked].filter(
-      (index) => Number.isInteger(index) && index >= 0 && index < project.pattern.cells.length && project.pattern.cells[index] !== 0xffff,
-    ).length;
-    const value = total ? (done / total) * 100 : 0;
-    const percent = new Intl.NumberFormat("ru-RU", {
-      minimumFractionDigits: value < 10 ? 1 : 0,
-      maximumFractionDigits: 1,
-    }).format(value);
-    $("#progress-label").textContent = `${percent} %`;
+    const value = total ? checked.size / total * 100 : 0;
+    $("#progress-label").textContent = stitchProgress(checked.size, total);
     $("#progress-bar").style.width = `${value}%`;
   }
   function scheduleSave() {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => flush(), 80);
+    dirty = true;
+    // Do not debounce forever during a long stroke.
+    if (!saveTimer) saveTimer = setTimeout(() => { saveTimer = null; flush(); }, 300);
   }
-  function flush() {
-    if (!project) return;
-    project.checked = [...checked];
-    project.updated = Date.now();
-    save(project);
+  async function flush() {
+    if (!project || !dirty) return;
+    const target = project;
+    const snapshot = { ...target, checked: [...checked], updated: Date.now() };
+    target.checked = snapshot.checked;
+    target.updated = snapshot.updated;
+    dirty = false;
+    const previous = saving;
+    pendingSaves++;
+    saving = (async () => {
+      if (previous) await previous;
+      reportSaveStatus('saving');
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { await save(snapshot); reportSaveStatus('saved'); return; }
+        catch {
+          if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+        }
+      }
+      if (project === target) dirty = true;
+      reportSaveStatus('error');
+    })();
+    try { await saving; } finally { pendingSaves--; }
   }
   function cellAt(x, y) {
     const { size, left, top } = geometry();
@@ -203,139 +264,116 @@ export function createStitchView({ save, getSkeins }) {
       : -1;
   }
   function applyCell(index) {
-    if (
-      index < 0 ||
-      project.pattern.cells[index] === 0xffff ||
-      touched.has(index)
-    )
-      return;
+    if (index < 0 || project.pattern.cells[index] === 0xffff || touched.has(index)) return;
     touched.add(index);
-    if (!gesture?.historySaved) {
-      history.push(new Set(checked));
-      if (gesture) gesture.historySaved = true;
-    }
-    if (gestureCheck) checked.add(index);
-    else checked.delete(index);
+    if (checked.has(index) === gestureCheck) return;
+    gesture.delta.push([index, checked.has(index)]);
+    if (gestureCheck) checked.add(index); else checked.delete(index);
+    scheduleSave();
   }
-  canvas.addEventListener("pointerdown", (event) => {
-    canvas.setPointerCapture(event.pointerId);
-    pointers.set(event.pointerId, { x: event.offsetX, y: event.offsetY });
-    if (pointers.size === 1) {
-      gesture = {
-        x: event.offsetX,
-        y: event.offsetY,
-        lastX: event.offsetX,
-        lastY: event.offsetY,
-        moved: false,
-      };
-      touched = new Set();
-      const cell = cellAt(event.offsetX, event.offsetY);
-      if ($("#check-toggle").classList.contains("active") && cell >= 0) {
-        gestureCheck = !checked.has(cell);
-        gesture.startCell = cell;
-        paintMode = true;
-      }
-    } else {
-      paintMode = false;
-      gestureCheck = null;
-      gesture = null;
+  function finishStroke() {
+    if (gesture?.delta?.length) {
+      history.push(gesture.delta);
+      if (history.length > 50) history.shift();
+      gesture.delta = [];
     }
+  }
+  function stroke(from, to) {
+    const {size, left, top} = geometry();
+    const x0 = (from.x-left)/size, y0 = (from.y-top)/size;
+    const dx = (to.x-from.x)/size, dy = (to.y-from.y)/size;
+    // Grid traversal includes even a tiny corner crossing between samples.
+    let col=Math.floor(x0), row=Math.floor(y0);
+    const endCol=Math.floor(x0+dx), endRow=Math.floor(y0+dy);
+    const stepX=Math.sign(dx), stepY=Math.sign(dy);
+    const deltaX=dx ? Math.abs(1/dx) : Infinity, deltaY=dy ? Math.abs(1/dy) : Infinity;
+    let nextX=dx ? (stepX>0 ? col+1-x0 : x0-col)*deltaX : Infinity;
+    let nextY=dy ? (stepY>0 ? row+1-y0 : y0-row)*deltaY : Infinity;
+    while (true) {
+      if (col>=0 && col<project.pattern.cols && row>=0 && row<project.pattern.rows) applyCell(row*project.pattern.cols+col);
+      if (col===endCol && row===endRow) break;
+      if (nextX<nextY) {col+=stepX;nextX+=deltaX;}
+      else if (nextY<nextX) {row+=stepY;nextY+=deltaY;}
+      else {col+=stepX;row+=stepY;nextX+=deltaX;nextY+=deltaY;}
+    }
+  }
+  const pointOf = event => {
+    const rect = canvas.getBoundingClientRect();
+    return {x: event.clientX-rect.left, y: event.clientY-rect.top};
+  };
+  function beginSingle(point, blocked = false) {
+    gesture = {type: 'single', start: point, last: point, time: performance.now(), moved: false, blocked, delta: []};
+    touched = new Set();
+    gestureCheck = !checked.has(cellAt(point.x, point.y));
+  }
+  function beginPinch() {
+    if (gesture?.delta?.length) {
+      for (const [index, wasChecked] of gesture.delta) { if (wasChecked) checked.add(index); else checked.delete(index); }
+      scheduleSave();
+    }
+    const [a,b] = [...pointers.values()];
+    gesture = {type: 'pinch', distance: Math.max(1, Math.hypot(a.x-b.x,a.y-b.y)), zoom, panX, panY, x:(a.x+b.x)/2, y:(a.y+b.y)/2};
+  }
+  canvas.addEventListener('pointerdown', event => {
+    if (!project) return;
+    event.preventDefault();
+    canvas.setPointerCapture(event.pointerId);
+    pointers.set(event.pointerId, pointOf(event));
+    if (pointers.size === 1) beginSingle(pointOf(event));
+    else beginPinch();
   });
-  canvas.addEventListener("pointermove", (event) => {
-    if (!pointers.has(event.pointerId)) return;
-    const previous = pointers.get(event.pointerId);
-    const point = { x: event.offsetX, y: event.offsetY };
+  canvas.addEventListener('pointermove', event => {
+    if (!pointers.has(event.pointerId) || !gesture) return;
+    const point = pointOf(event);
     pointers.set(event.pointerId, point);
     if (pointers.size >= 2) {
-      const pair = [...pointers.values()].slice(0, 2);
-      if (!gesture)
-        gesture = {
-          distance: Math.hypot(pair[0].x - pair[1].x, pair[0].y - pair[1].y),
-          zoom,
-          panX,
-          panY,
-          center: {
-            x: (pair[0].x + pair[1].x) / 2,
-            y: (pair[0].y + pair[1].y) / 2,
-          },
-        };
-      else if (gesture.distance) {
-        const distance = Math.hypot(
-          pair[0].x - pair[1].x,
-          pair[0].y - pair[1].y,
-        );
-        const centerX = (pair[0].x + pair[1].x) / 2;
-        const centerY = (pair[0].y + pair[1].y) / 2;
-        zoom = Math.max(
-          0.5,
-          Math.min(
-            12,
-            (gesture.zoom * distance) / Math.max(1, gesture.distance),
-          ),
-        );
-        const ratio = zoom / gesture.zoom;
-        panX =
-          centerX -
-          canvas.clientWidth / 2 -
-          (gesture.center.x - canvas.clientWidth / 2 - gesture.panX) * ratio;
-        panY =
-          centerY -
-          canvas.clientHeight / 2 -
-          (gesture.center.y - canvas.clientHeight / 2 - gesture.panY) * ratio;
-      }
-    } else if (gesture) {
-      const dx = point.x - previous.x;
-      const dy = point.y - previous.y;
-      if (
-        paintMode &&
-        Math.hypot(point.x - gesture.x, point.y - gesture.y) > 2
-      ) {
-        if (!gesture.moved) applyCell(gesture.startCell);
-        gesture.moved = true;
-        applyCell(cellAt(point.x, point.y));
-      } else if (!$("#check-toggle").classList.contains("active")) {
-        panX += dx;
-        panY += dy;
-        gesture.moved ||= Math.abs(dx) + Math.abs(dy) > 2;
+      const [a,b] = [...pointers.values()];
+      const x=(a.x+b.x)/2, y=(a.y+b.y)/2;
+      zoom = gesture.zoom; panX=gesture.panX; panY=gesture.panY;
+      zoomAt(gesture.zoom*Math.hypot(a.x-b.x,a.y-b.y)/gesture.distance, gesture.x, gesture.y);
+      panX += x-gesture.x; panY += y-gesture.y;
+    } else {
+      gesture.moved ||= Math.hypot(point.x-gesture.start.x, point.y-gesture.start.y) >= 18;
+      if (gesture.moved) {
+        if (!gesture.blocked && geometry().size >= 20 && $("#check-toggle").classList.contains('active')) stroke(gesture.last, point);
+        else { panX+=point.x-gesture.last.x; panY+=point.y-gesture.last.y; }
+        gesture.last=point;
       }
     }
-    draw();
+    boundPan(); draw();
   });
-  const endPointer = (event) => {
-    pointers.delete(event.pointerId);
-    if (!pointers.size) {
-      if (paintMode) {
-        if (!gesture?.moved) applyCell(gesture?.startCell ?? -1);
-        scheduleSave();
+  function endPointer(event) {
+    if (!pointers.has(event.pointerId)) return;
+    if (gesture?.type === 'single') {
+      if (event.type === 'pointerup' && !gesture.blocked && !gesture.moved) {
+        if (geometry().size < 20) {
+          if (!zoomHintShown) {
+            zoomHintShown = true;
+            $("#zoom-hint").textContent = stitchRu.zoomHint;
+            $("#zoom-hint").classList.remove('hidden');
+            setTimeout(() => $("#zoom-hint").classList.add('hidden'), 5000);
+          }
+          zoomAt(zoom * 32 / geometry().size, gesture.start.x, gesture.start.y);
+        } else applyCell(cellAt(gesture.start.x, gesture.start.y));
       }
-      paintMode = false;
-      gestureCheck = null;
-      gesture = null;
-    } else if (pointers.size === 1) {
-      gesture = null;
+      finishStroke();
     }
+    pointers.delete(event.pointerId);
+    if (pointers.size >= 2) beginPinch();
+    else if (pointers.size === 1) beginSingle([...pointers.values()][0], true);
+    else gesture=null;
     draw();
-  };
-  canvas.addEventListener("pointerup", endPointer);
-  canvas.addEventListener("pointercancel", endPointer);
-  canvas.addEventListener(
-    "wheel",
-    (event) => {
-      event.preventDefault();
-      const before = zoom;
-      zoom = Math.max(0.5, Math.min(12, zoom * (event.deltaY < 0 ? 1.1 : 0.9)));
-      panX =
-        ((panX - event.offsetX + canvas.clientWidth / 2) * zoom) / before +
-        event.offsetX -
-        canvas.clientWidth / 2;
-      panY =
-        ((panY - event.offsetY + canvas.clientHeight / 2) * zoom) / before +
-        event.offsetY -
-        canvas.clientHeight / 2;
-      draw();
-    },
-    { passive: false },
-  );
+  }
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
+  canvas.addEventListener('wheel', event => {
+    event.preventDefault();
+    const p = pointOf(event);
+    zoomAt(zoom*Math.exp(-event.deltaY*.002), p.x, p.y);
+  }, {passive:false});
+  $("#zoom-in").addEventListener('click', () => zoomAt(zoom*1.4,canvas.clientWidth/2,canvas.clientHeight/2));
+  $("#zoom-out").addEventListener('click', () => zoomAt(zoom/1.4,canvas.clientWidth/2,canvas.clientHeight/2));
+  $("#zoom-fit").addEventListener('click', () => {zoom=1;panX=panY=0;draw();});
   $("#check-toggle").addEventListener("click", () => setCheckMode(!$("#check-toggle").classList.contains("active")));
   function openOverlay({ fromHistory = false } = {}) {
     $("#palette-panel").classList.remove("hidden");
@@ -350,22 +388,16 @@ export function createStitchView({ save, getSkeins }) {
     if (!fromHistory && wasOpen && window.history.state?.overlay === "palette") window.history.back();
   }
   $("#open-palette").addEventListener("click", () => { $("#palette-filter-wrap").classList.add("hidden"); openOverlay(); });
-  $("#color-filter-open").addEventListener("click", () => { $("#palette-filter-wrap").classList.remove("hidden"); openOverlay(); });
-  $("#palette-filter-toggle").addEventListener("click", () => $("#palette-filter-wrap").classList.toggle("hidden"));
+  $("#color-filter-open")?.addEventListener("click", () => { $("#palette-filter-wrap").classList.remove("hidden"); openOverlay(); });
+  $("#palette-filter-toggle")?.addEventListener("click", () => $("#palette-filter-wrap").classList.toggle("hidden"));
   $("#close-palette").addEventListener("click", () => closeOverlays());
-  $("#color-filter").addEventListener("change", event => { filterCode = event.target.value || null; draw(); });
-  canvas.addEventListener("pointerup", () => {
-    const now = Date.now();
-    if (now - lastTap < 320) { zoom = Math.min(12, zoom < 1.3 ? 2 : zoom * 1.6); panX = 0; panY = 0; draw(); }
-    lastTap = now;
-  });
-  $("#display-mode").addEventListener("change", (event) => {
-    showMode = event.target.value;
-    draw();
+  $("#color-filter").addEventListener("change", event => { setColorFilter(event.target.value); });
+  $("#display-mode")?.addEventListener("change", (event) => {
+    setDisplayMode(event.target.value);
   });
   $("#undo").addEventListener("click", () => {
     if (history.length) {
-      checked = history.pop();
+      for (const [index, wasChecked] of history.pop()) { if (wasChecked) checked.add(index); else checked.delete(index); }
       scheduleSave();
       draw();
     }
@@ -383,16 +415,22 @@ export function createStitchView({ save, getSkeins }) {
   window.addEventListener("resize", draw);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
-      clearTimeout(saveTimer);
+      clearTimeout(saveTimer); saveTimer = null;
       flush();
     }
   });
   window.addEventListener("pagehide", () => {
-    clearTimeout(saveTimer);
+    clearTimeout(saveTimer); saveTimer = null;
     flush();
   });
-  return {
+  currentView = {
+    setDisplayMode,
+    getDisplayMode: () => showMode,
+    setColorFilter,
+    getColorFilter: () => filterCode,
+    isBusy: () => !!(dirty || pendingSaves || pointers.size || $("#check-toggle").classList.contains('active')),
     open(nextProject) {
+      if (dirty && project) { project.checked = [...checked]; flush(); }
       project = nextProject;
       checked = new Set(project.checked || []);
       if (!project.checked?.length && project.checkedBits)
@@ -400,6 +438,9 @@ export function createStitchView({ save, getSkeins }) {
           for (let bit = 0; bit < 8; bit++)
             if (byte & (1 << bit)) checked.add(byteIndex * 8 + bit);
         });
+      checked = new Set([...checked].filter(index => Number.isInteger(index) && index >= 0 && index < project.pattern.cells.length && project.pattern.cells[index] !== 0xffff));
+      total = project.pattern.cells.reduce((count, value) => count + (value === 0xffff ? 0 : 1), 0);
+      pointers.clear(); gesture = null;
       history = [];
       setCheckMode(false);
       zoom = 1;
@@ -407,8 +448,8 @@ export function createStitchView({ save, getSkeins }) {
       panY = 0;
       filterCode = null;
       $("#check-toggle").classList.remove("active");
-      $("#color-filter").innerHTML = '<option value="">Toutes</option>' + project.pattern.colors.map(color => `<option value="${color.code}">${color.code}</option>`).join("");
-    closeOverlays({ fromHistory: true });
+      $("#color-filter").innerHTML = `<option value="">${stitchRu.allColors}</option>` + project.pattern.colors.map(color => `<option value="${color.code}">${color.code}</option>`).join("");
+      closeOverlays({ fromHistory: true });
       $("#stitch-title").textContent = project.name;
       draw();
     },
@@ -422,4 +463,5 @@ export function createStitchView({ save, getSkeins }) {
       draw();
     },
   };
+  return currentView;
 }

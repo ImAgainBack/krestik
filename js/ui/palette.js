@@ -1,12 +1,14 @@
 import { DMC } from "../engine/dmc.js";
 import { estimateSkeins } from "../engine/index.js";
-import { $, escapeHtml } from "./dom.js";
+import { $, escapeHtml, showDialog } from "./dom.js";
 import { symbolFor } from "./symbols.js";
 import { ru, formatNumber, formatSkeins, formatStitches } from "../i18n/ru.js";
 import { dmcNameRu, dmcSearchText } from "../i18n/dmc-names-ru.js";
 
 export function renderPalette(pattern, { checked, onAction, skeins }) {
   const list = $("#palette-list");
+  let status = document.querySelector("#palette-status");
+  if (!status) { status = document.createElement("p"); status.id = "palette-status"; status.className = "muted"; status.setAttribute("aria-live", "polite"); $("#palette-panel").prepend(status); }
   const completedCounts = new Map();
   checked.forEach((index) => {
     const color = pattern.cells[index];
@@ -32,7 +34,7 @@ export function renderPalette(pattern, { checked, onAction, skeins }) {
         .slice(0, 8);
       const skeinCount = Math.max(1, Math.ceil(skeins ? skeins(total) : estimateSkeins(total, 14)));
       return `<article class="palette-row" data-code="${escapeHtml(color.code)}"><span class="swatch" style="background:${escapeHtml(color.hex.startsWith("#") ? color.hex : `#${color.hex}`)}">${symbolFor(index)}</span>
-      <div class="palette-meta"><b>${escapeHtml(color.code)} · ${escapeHtml(dmcNameRu(color.code, color.name))}</b><small>${formatStitches(total)} · ${formatNumber(completed)} готово · ${formatSkeins(skeinCount)}</small></div>
+      <div class="palette-meta"><b>${escapeHtml(color.code)} · ${escapeHtml(dmcNameRu(color.code, color.name))}</b><small>${formatStitches(total)} · вышито ${formatNumber(completed)} · ${formatSkeins(skeinCount)}</small></div>
       <div class="palette-actions"><button class="button secondary" data-action="highlight">${ru.highlight}</button><button class="button secondary" data-action="exclude">${ru.missingColor}</button><button class="button secondary" data-action="replace">${ru.replace}</button>
       <select aria-label="Похожие оттенки для ${escapeHtml(color.code)}" class="replace-select"><option value="">Похожий цвет DMC…</option>${suggestions.map((item) => `<option value="${item.code}">${item.code} ${escapeHtml(item.name)}</option>`).join("")}</select><input class="replace-search" list="dmc-options" placeholder="Код или название…" aria-label="Поиск цвета DMC"></div></article>`;
     })
@@ -45,13 +47,18 @@ export function renderPalette(pattern, { checked, onAction, skeins }) {
   list.append(datalist);
   let dialog = document.querySelector("#replace-dialog");
   if (!dialog) { dialog = document.createElement("dialog"); dialog.id = "replace-dialog"; document.body.append(dialog); }
-  list.onclick = (event) => {
+  list.onclick = async (event) => {
     const rowTap = event.target.closest(".palette-row");
     if (rowTap && !event.target.closest("[data-action]")) rowTap.classList.toggle("selected");
     const button = event.target.closest("[data-action]");
     if (!button) return;
     const row = button.closest("[data-code]");
     if (button.dataset.action === "replace") {
+      const pending = row.dataset.pendingReplacement;
+      if (DMC.some(([item]) => item === pending)) {
+        await onAction("replace", row.dataset.code, pending);
+        return;
+      }
       const choices = [...row.querySelector(".replace-select").options].slice(1);
       dialog.innerHTML = `<form method="dialog"><h2>Заменить ${escapeHtml(row.dataset.code)}</h2><label>Поиск<input id="replace-query" list="dmc-options" placeholder="Код или название DMC"></label><label>Похожие оттенки<select id="replace-choice">${choices.map(option => `<option value="${option.value}">${escapeHtml(option.textContent)}</option>`).join("")}</select></label><div class="replace-suggestions">${choices.map(option => `<button type="button" data-code="${option.value}">${escapeHtml(option.textContent)}</button>`).join("")}</div><button value="cancel">Отмена</button><button id="replace-confirm" value="confirm">${ru.replace}</button></form>`;
       dialog.querySelector("form").addEventListener("submit", event => {
@@ -71,6 +78,10 @@ export function renderPalette(pattern, { checked, onAction, skeins }) {
       if (history.state?.overlay !== "replace") {
         history.pushState({ pointCroix: true, screen: "stitch", overlay: "replace" }, "", `${location.pathname}${location.search}#stitch`);
       }
+    } else if (button.dataset.action === "exclude") {
+      const started = checked.size > 0;
+      const result = await showDialog({ title: "Убрать цвет из схемы?", message: started ? "Схема пересчитается. Уже отмеченные крестики останутся на своих местах." : "Схема пересчитается без этого цвета.", actions: [{ value: "cancel", label: "Отмена" }, { value: "confirm", label: "Убрать цвет", danger: true }] });
+      if (result.value === "confirm") await onAction("exclude", row.dataset.code);
     } else onAction(button.dataset.action, row.dataset.code);
   };
   dialog.onclose = () => {
@@ -78,11 +89,9 @@ export function renderPalette(pattern, { checked, onAction, skeins }) {
   };
   list.onchange = (event) => {
     if (!event.target.matches(".replace-select, .replace-search")) return;
+    // Selection only prepares a choice. The separate replacement button confirms it.
     const row = event.target.closest("[data-code]");
-    const selectedCode = event.target.value.trim().split(" ")[0];
-    if (DMC.some(([code]) => code === selectedCode)) {
-      onAction("replace", row.dataset.code, selectedCode);
-    }
+    row.dataset.pendingReplacement = event.target.value.trim().split(" ")[0];
   };
 }
 

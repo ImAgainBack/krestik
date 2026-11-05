@@ -1,5 +1,5 @@
 import { symbolFor } from "./symbols.js";
-import { formatNumber } from "../i18n/ru.js";
+import { crosses } from "../i18n/ru-stitch.js";
 import { dmcNameRu } from "../i18n/dmc-names-ru.js";
 
 const colorValue = (color) => (color.startsWith("#") ? color : `#${color}`);
@@ -56,7 +56,7 @@ export function exportPattern(project) {
     context.fillStyle = "#20231f";
     context.font = "14px sans-serif";
     context.fillText(
-      `${symbolFor(index)}  ${color.code} ${dmcNameRu(color.code, color.name)} · ${formatNumber(color.count)} крестиков`,
+      `${symbolFor(index)}  ${color.code} ${dmcNameRu(color.code, color.name)} · ${crosses(color.count)}`,
       margin + 26,
       y,
     );
@@ -122,7 +122,7 @@ export function printPattern(project) {
       row.append(
         swatch,
         document.createTextNode(
-          `${color.code} · ${dmcNameRu(color.code, color.name)} · ${formatNumber(color.count)} крестиков`,
+          `${color.code} · ${dmcNameRu(color.code, color.name)} · ${crosses(color.count)}`,
         ),
       );
       page.append(row);
@@ -146,7 +146,6 @@ function drawPageTile(
   context.fillRect(0, 0, canvas.width, canvas.height);
   context.fillStyle = "#20231f";
   context.font = "bold 16px sans-serif";
-  context.fillText(`Крестик · ${project.name}`, margin, 28);
   for (let row = startRow; row < endRow; row++) {
     for (let col = startCol; col < endCol; col++) {
       const index = row * pattern.cols + col;

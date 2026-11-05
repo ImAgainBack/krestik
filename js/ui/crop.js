@@ -7,8 +7,10 @@ export function setupCrop() {
   let image = null;
   let quad = null;
   let active = -1;
+  let rectangular = false;
   let scale = 1;
   let offset = { x: 0, y: 0 };
+  let onChange = () => {};
 
   function draw() {
     if (!image) return;
@@ -96,15 +98,24 @@ export function setupCrop() {
   canvas.addEventListener("pointermove", (event) => {
     if (active < 0 || !image) return;
     const rect = canvas.getBoundingClientRect();
-    const x = Math.max(
+    let x = Math.max(
       0,
       Math.min(image.width, (event.clientX - rect.left) / scale),
     );
-    const y = Math.max(
+    let y = Math.max(
       0,
       Math.min(image.height, (event.clientY - rect.top) / scale),
     );
-    quad[active] = [x, y];
+    if (rectangular) {
+      const right = Math.max(1, image.width - 1), bottom = Math.max(1, image.height - 1);
+      const leftX = Math.min(quad[0][0], quad[3][0]), topY = Math.min(quad[0][1], quad[1][1]);
+      const rightX = Math.max(quad[1][0], quad[2][0]), bottomY = Math.max(quad[2][1], quad[3][1]);
+      if (active === 0) { x = Math.min(x, rightX - 1); y = Math.min(y, bottomY - 1); quad[0] = [x,y]; quad[1] = [rightX,y]; quad[3] = [x,bottomY]; }
+      if (active === 1) { x = Math.max(x, leftX + 1); y = Math.min(y, bottomY - 1); quad[0] = [leftX,y]; quad[1] = [x,y]; quad[2] = [x,bottomY]; }
+      if (active === 2) { x = Math.max(x, leftX + 1); y = Math.max(y, topY + 1); quad[1] = [x,topY]; quad[2] = [x,y]; quad[3] = [leftX,y]; }
+      if (active === 3) { x = Math.min(x, rightX - 1); y = Math.max(y, topY + 1); quad[0] = [x,topY]; quad[2] = [rightX,y]; quad[3] = [x,y]; }
+    } else quad[active] = [x, y];
+    onChange();
     offset = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     const shellRect = canvas.parentElement.getBoundingClientRect();
     magnifier.style.left = `${Math.min(shellRect.width - 112, rect.left - shellRect.left + offset.x + 12)}px`;
@@ -133,7 +144,9 @@ export function setupCrop() {
   window.addEventListener("resize", draw);
   return {
     setImage,
+    onChange(callback) { onChange = callback || (() => {}); },
     resetQuad,
+    setRectangular(value) { rectangular = Boolean(value); },
     getQuad: () => quad?.map((point) => [...point]),
     setQuad(points) { if (points?.length === 4) { quad = points.map(point => [...point]); draw(); } },
     redraw: draw,

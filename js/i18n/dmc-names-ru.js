@@ -49,6 +49,13 @@ const phrase = (name) => compounds.reduce(
   .join(" ")
   .replace(/очень светлый/g, "очень светлый")
   .replace(/светлый очень тёмный/g, "очень тёмный");
-export const DMC_NAMES_RU = Object.fromEntries(DMC.map(([code, name]) => [code, phrase(name)]));
+const translated = DMC.map(([code, name]) => [code, phrase(name)]);
+const seenNames = new Set();
+export const DMC_NAMES_RU = Object.fromEntries(translated.map(([code, name]) => {
+  let unique = name;
+  if (seenNames.has(unique)) unique = `${name} (${code})`;
+  seenNames.add(unique);
+  return [code, unique];
+}));
 export const dmcNameRu = (code, fallback = "") => DMC_NAMES_RU[code] || fallback;
 export const dmcSearchText = (code, english) => `${code} ${dmcNameRu(code, english)} ${english}`;

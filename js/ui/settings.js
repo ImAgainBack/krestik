@@ -11,12 +11,13 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
   const fields = ["cols", "rows", "max-colors", "aida", "dither", "empty-background", "cleanup"];
   const readModeSettings = () => Object.fromEntries(fields.map(id => {
     const input = $(`#${id}`);
-    return [id, input.type === "checkbox" ? input.checked : input.value];
+    return [id, id === "dither" ? input.checked : input.type === "checkbox" ? input.checked : input.value];
   }));
   const writeModeSettings = state => {
     fields.forEach(id => {
       const input = $(`#${id}`);
-      if (input.type === "checkbox") input.checked = Boolean(state[id]);
+    if (id === "dither") input.checked = Boolean(state[id]);
+    else if (input.type === "checkbox") input.checked = Boolean(state[id]);
       else input.value = String(state[id]);
     });
     $("#max-colors-out").value = $("#max-colors").value;
@@ -39,7 +40,14 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
   function updatePhysicalSize() {
     const n = Number($("#aida").value);
     const format = { format: (value) => formatNumber(value, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) };
-    $("#physical-size").textContent = `Размер готовой вышивки: ${format.format((Number(cols.value) / n) * 2.54)} × ${format.format((Number(rows.value) / n) * 2.54)} см`;
+    $("#physical-size").textContent = `${format.format((Number(cols.value) / n) * 2.54)} × ${format.format((Number(rows.value) / n) * 2.54)} см`;
+    $("#size-summary").textContent = `${formatNumber(Number(cols.value))} × ${formatNumber(Number(rows.value))} крестиков · примерно ${format.format((Number(cols.value) / n) * 2.54)} × ${format.format((Number(rows.value) / n) * 2.54)} см`;
+    const cm = (Number(cols.value) / n) * 2.54;
+    const closestSize = [10, 20, 30].reduce((best, item) => Math.abs(item - cm) < Math.abs(best - cm) ? item : best, 10);
+    $$("#photo-size-options [data-size]").forEach((button) => button.classList.toggle("active", Number(button.dataset.size) === closestSize));
+    const colors = Number($("#max-colors").value);
+    const closestColors = [10, 20, 35].reduce((best, item) => Math.abs(item - colors) < Math.abs(best - colors) ? item : best, 10);
+    $$("#color-options [data-colors]").forEach((button) => button.classList.toggle("active", Number(button.dataset.colors) === closestColors));
     $("#stitch-count").textContent = formatStitches(Number(cols.value) * Number(rows.value));
   }
   function ratio() {
@@ -53,12 +61,14 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
   function schedule() {
     updatePhysicalSize(); clearTimeout(timer);
     if (!getImage()) return;
-    $("#preview-summary").textContent = "Подготовка схемы…";
+    $("#preview-summary").textContent = "Готовим схему…";
+    $("#create-pattern").disabled = true;
     const current = ++version;
     timer = setTimeout(async () => {
       try {
         const pattern = await calculate(getImage(), getOptions());
         if (current !== version) return;
+        $("#create-pattern").disabled = false;
         $("#preview-summary").textContent = `Схема: ${formatNumber(pattern.cols)} × ${formatNumber(pattern.rows)} крестиков · ${formatNumber(pattern.colors.length)} цветов`;
         const canvas = $("#preview-canvas"), context = canvas.getContext("2d");
         const scale = Math.min(240 / pattern.cols, 240 / pattern.rows);
@@ -69,7 +79,7 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
           context.fillRect(x*scale,y*scale,Math.ceil(scale),Math.ceil(scale));
         }
         $("#preview-palette").innerHTML = pattern.colors.map(c => `<span title="${c.code} · ${c.name}" style="background:${c.hex.startsWith("#")?c.hex:`#${c.hex}`}"></span>`).join("");
-      } catch { if (current === version) $("#preview-summary").textContent = "Не удалось подготовить схему. Проверьте настройки."; }
+      } catch { if (current === version) { $("#preview-summary").textContent = "Не удалось подготовить схему. Проверьте настройки."; $("#create-pattern").disabled = false; } }
     }, 250);
   }
   function clampFields() {
@@ -84,23 +94,39 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
   $("#legend-codes").addEventListener("input", () => { legendCodes(); schedule(); });
   $("#max-colors").addEventListener("input", e => { $("#max-colors-out").value=e.target.value; remember(); schedule(); });
   ["aida","dither","empty-background","cleanup"].forEach(id => $(`#${id}`).addEventListener("change", () => { remember(); schedule(); }));
+  $("#photo-size-options").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-size]"); if (!button) return;
+    const stitches = Math.max(1, Math.round(Number(button.dataset.size) / 2.54 * Number($("#aida").value)));
+    cols.value = String(stitches); rows.value = String(Math.max(1, Math.round(stitches / ratio()))); detected = false; remember(); schedule(); cols.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  $("#color-options").addEventListener("click", (event) => { const button = event.target.closest("[data-colors]"); if (!button) return; $("#max-colors").value = button.dataset.colors; $("#max-colors-out").value = button.dataset.colors; remember(); schedule(); $("#max-colors").dispatchEvent(new Event("input", { bubbles: true })); });
   $("#only-stock").addEventListener("change", schedule);
   $$("input[name=mode]").forEach(input => input.addEventListener("change", () => {
     if (!input.checked) return;
     modeSettings.set(currentMode, readModeSettings());
     currentMode = input.value;
     if (!modeSettings.has(currentMode)) modeSettings.set(currentMode, currentMode === "photo"
-      ? { ...readModeSettings(), cols: 100, rows: 100, "max-colors": 30, dither: 0, "empty-background": false, cleanup: 1 }
-      : readModeSettings());
+      ? { ...readModeSettings(), cols: 100, rows: 100, "max-colors": 30, dither: false, "empty-background": false, cleanup: 1 }
+      : { ...readModeSettings(), "empty-background": true, "max-colors": 20, dither: false, cleanup: 1 });
     writeModeSettings(modeSettings.get(currentMode));
     const grid = input.value === "chart" && input.checked;
     detected = false;
+    $("#grid-crop-wrap").classList.remove("hidden");
+    $("#crop-heading").textContent = input.value === "photo" ? "Обрежьте фотографию" : "Проверьте рамку схемы";
+    $("#grid-detection").classList.toggle("hidden", input.value !== "chart");
     $("#dither-row").classList.toggle("hidden", input.value !== "photo" || !input.checked);
+    $("#photo-size-options").classList.toggle("hidden", input.value !== "photo");
+    $("#color-options").classList.toggle("hidden", input.value !== "photo");
     $("#detect-grid").classList.toggle("hidden", !grid); $("#legend-row").classList.toggle("hidden", !grid);
     schedule();
   }));
   const selected = $("input[name=mode]:checked");
   $("#dither-row").classList.toggle("hidden", selected?.value !== "photo");
+  $("#grid-crop-wrap").classList.remove("hidden");
+  $("#crop-heading").textContent = selected?.value === "photo" ? "Обрежьте фотографию" : "Проверьте рамку схемы";
+  $("#grid-detection").classList.toggle("hidden", selected?.value !== "chart");
+  $("#photo-size-options").classList.toggle("hidden", selected?.value !== "photo");
+  $("#color-options").classList.toggle("hidden", selected?.value !== "photo");
   $("#legend-row").classList.toggle("hidden", selected?.value !== "chart");
   $("#detect-grid").classList.toggle("hidden", selected?.value !== "chart");
   updatePhysicalSize();
@@ -108,13 +134,13 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
     schedule,
     setDetected(value) { detected = value; remember(); },
     setPhotoDimensions(width, height) {
-      if (!modeSettings.has("photo")) {
-        modeSettings.set("photo", {
-          ...readModeSettings(), cols: 100,
-          rows: Math.max(1, Math.min(400, Math.round(100 * height / Math.max(1, width)))),
-          "max-colors": 30, dither: 0, "empty-background": false, cleanup: 1,
-        });
-      }
+      const photo = {
+        ...(modeSettings.get("photo") || readModeSettings()), cols: 100,
+        rows: Math.max(1, Math.min(400, Math.round(100 * height / Math.max(1, width)))),
+        "max-colors": 30, dither: false, "empty-background": false, cleanup: 1,
+      };
+      modeSettings.set("photo", photo);
+      if (currentMode === "photo") { writeModeSettings(photo); schedule(); }
     },
     selectMode(mode) {
       const input = $(`input[name=mode][value=${mode}]`);

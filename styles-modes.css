@@ -27,6 +27,9 @@
     border-color: #ffffff33;
   }
 }
+@media (max-width: 699px) {
+  .palette-actions button, .palette-actions select, .palette-actions input { min-height: 48px; font-size: 14px; }
+}
 @page {
   size: A4 portrait;
   margin: 12mm;
@@ -129,3 +132,8 @@ dialog#replace-dialog::backdrop { background:#1119; }
 dialog#replace-dialog form { display:grid; gap:12px; }
 .replace-suggestions { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
 .replace-suggestions button { min-height:44px; }
+@media (prefers-color-scheme: dark) {
+  :root { --paper:#161816; --card:#1f2220; --ink:#ece9e2; --muted:#b8b4ac; --line:rgba(236,233,226,.16); --green:#7fb394; --green-light:#28382e; }
+  .primary { background:#7fb394; border-color:#7fb394; color:#161816; }
+  .danger-text,.danger { color:#e08a78 !important; }
+}

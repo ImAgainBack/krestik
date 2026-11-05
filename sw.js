@@ -1,9 +1,10 @@
-const CACHE_NAME = "krestik-v11";
+const CACHE_NAME = "krestik-v14";
 const FILES = [
   "./",
   "./index.html",
   "./styles.css",
   "./styles-modes.css",
+  "./styles-stitch.css",
   "./manifest.webmanifest",
   "./js/app.js",
   "./js/i18n/ru.js",
@@ -29,24 +30,23 @@ const FILES = [
   "./js/ui/inventory.js",
   "./js/ui/stitch.js",
   "./js/ui/export.js",
+  "./js/ui/backup.js",
+  "./js/i18n/ru-stitch.js",
   "./js/ui/symbols.js",
 ];
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE_NAME);
-      await Promise.all(
-        FILES.map(async (file) => {
-          try {
-            const cacheUrl = new URL(file, self.registration.scope);
-            const freshUrl = new URL(cacheUrl);
-            freshUrl.searchParams.set("__precache", CACHE_NAME);
-            const response = await fetch(freshUrl, { cache: "reload" });
-            if (response.ok) await cache.put(cacheUrl.href, response);
-          } catch {}
-        }),
-      );
-      await self.skipWaiting();
+      // Cache.addAll is atomic: one failed essential response rejects installation.
+      const requests = FILES.map(file => new Request(new URL(file, self.registration.scope), {cache:'reload'}));
+      await cache.addAll(requests);
+      // Message contract: {type:'KRESTIK_UPDATE_AVAILABLE', version:CACHE_NAME}.
+      // App may show «Доступна новая версия». No forced activation.
+      if (self.registration.active) {
+        const clients = await self.clients.matchAll({includeUncontrolled:true});
+        clients.forEach(client => client.postMessage({type:'KRESTIK_UPDATE_AVAILABLE', version:CACHE_NAME}));
+      }
     })(),
   );
 });
@@ -81,8 +81,14 @@ self.addEventListener("fetch", (event) => {
         if (response.ok) await cache.put(event.request, response.clone());
         return response;
       } catch {
-        return cache.match("./index.html");
+        if (event.request.mode === "navigate") return await cache.match("./index.html") || Response.error();
+        return Response.error();
       }
     })(),
   );
+});
+
+// Optional explicit acceptance, sent only after the app/user chooses a safe moment.
+self.addEventListener('message', event => {
+  if (event.data?.type === 'KRESTIK_ACTIVATE_UPDATE') self.skipWaiting();
 });
