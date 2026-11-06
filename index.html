@@ -5,7 +5,7 @@
     <meta name="google" content="notranslate" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"
     />
     <meta name="theme-color" content="#f5f1e8" />
     <meta
@@ -161,7 +161,7 @@
           <button class="button secondary toolbar-button" id="open-palette"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v16H4z M4 10h16 M10 4v16"/></svg><small>Нитки</small></button>
         </div>
         <div class="save-row"><p id="stitch-save-status" role="status" aria-live="polite"></p><button id="stitch-backup" class="button secondary hidden">Сохранить копию</button></div>
-        <div id="palette-panel" class="palette-panel hidden"><div class="palette-panel-head"><b>Нитки</b><button id="close-palette" class="button secondary">Закрыть</button><button class="text-button" id="open-inventory">Мои нитки</button></div><div class="palette-tools"><label class="field">Показ ниток<select id="palette-display-mode"><option value="all">Цвета и значки</option><option value="colors">Только цвета</option><option value="symbols">Только значки</option></select></label><label class="field">Показать один цвет<select id="palette-color-filter"><option value="">Все цвета</option></select></label><div class="export-actions"><button class="button secondary" id="palette-export-png">Сохранить картинкой</button><button class="button secondary" id="palette-print">Печать / PDF</button></div></div><label id="palette-filter-wrap" class="field hidden">Фильтр по цвету<select id="color-filter" aria-label="Фильтр по цвету"><option value="">Все цвета</option></select></label>
+        <div id="palette-panel" class="palette-panel hidden"><div class="palette-panel-head"><b>Нитки</b><button id="close-palette" class="button secondary">Закрыть</button><button class="text-button" id="open-inventory">Мои нитки</button></div><div class="palette-tools"><label class="field">Показ ниток<select id="palette-display-mode"><option value="all">Цвета и значки</option><option value="colors">Только цвета</option><option value="symbols">Только значки</option></select></label><label class="field">Показать один цвет<select id="palette-color-filter"><option value="">Все цвета</option></select></label><div class="export-actions"><button class="button secondary" id="palette-pdf">Сохранить PDF</button><button class="button secondary" id="palette-print">Печать</button><button class="button secondary" id="palette-export-png">Сохранить картинкой</button></div></div><label id="palette-filter-wrap" class="field hidden">Фильтр по цвету<select id="color-filter" aria-label="Фильтр по цвету"><option value="">Все цвета</option></select></label>
 <div id="palette-list" class="palette-list"></div></div>
         <button id="export-png" class="hidden">Экспорт PNG</button>
         <div id="print-pages" aria-hidden="true"></div>

@@ -10,16 +10,25 @@ export const escapeHtml = (value) =>
         char
       ],
   );
-export function showDialog({ title, message, fields = [], actions = [] }) {
+export function showDialog({ title, message = "", fields = [], actions = [], stacked = false }) {
   let dialog = document.querySelector("#app-dialog");
   if (!dialog) {
     dialog = document.createElement("dialog");
     dialog.id = "app-dialog";
     document.body.append(dialog);
   }
-  dialog.innerHTML = `<form method="dialog"><h2>${escapeHtml(title)}</h2><p>${escapeHtml(message)}</p>${fields.map((f) => `<label>${escapeHtml(f.label)}<input name="value" maxlength="60" value="${escapeHtml(f.value || "")}"></label>`).join("")}<div class="dialog-actions">${actions.map((a) => `<button class="button ${a.danger ? "danger" : "secondary"}" value="${escapeHtml(a.value)}">${escapeHtml(a.label)}</button>`).join("")}</div></form>`;
+  dialog.classList.toggle("has-field", fields.length > 0);
+  dialog.innerHTML = `<form method="dialog"><h2>${escapeHtml(title)}</h2>${message ? `<p>${escapeHtml(message)}</p>` : ""}${fields.map((f) => `<label>${escapeHtml(f.label)}<input name="value" maxlength="60" enterkeyhint="done" value="${escapeHtml(f.value || "")}"></label>`).join("")}<div class="dialog-actions${stacked ? " stacked" : ""}">${actions.map((a) => `<button class="button ${a.danger ? "danger" : a.primary ? "primary" : "secondary"}" value="${escapeHtml(a.value)}">${escapeHtml(a.label)}</button>`).join("")}</div></form>`;
   return new Promise((resolve) => {
     dialog.addEventListener("close", () => resolve({ value: dialog.returnValue, text: dialog.querySelector('input[name="value"]')?.value }), { once: true });
+    const input = dialog.querySelector('input[name="value"]');
+    // « Entrée » / « Готово » du clavier = l'action principale (sinon le formulaire prendrait « Отмена »).
+    input?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      dialog.close((actions.find((a) => a.primary) || actions.at(-1))?.value || "");
+    });
+    dialog.returnValue = "";
     dialog.showModal();
   });
 }

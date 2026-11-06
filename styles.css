@@ -713,8 +713,6 @@ body { background: var(--paper); color: var(--ink); padding-bottom: 78px; }
 .project-actions { position: relative; align-self: start; }
 .menu-button { width: 48px; height: 48px; display: grid; place-items: center; background: transparent; color: var(--ink); border: 0; border-radius: 12px; }
 .menu-button svg, .bottom-nav svg, .upload-card svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
-.project-menu { position: absolute; right: 0; top: 48px; z-index: 2; width: 190px; display: grid; padding: 6px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
-.project-menu button { min-height: 48px; padding: 10px; text-align: left; background: none; color: var(--ink); border: 0; font: inherit; }
 .danger-text, .danger { color: #a3402f !important; }
 .draft-card { margin: 18px 0 24px; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); }
 .draft-card h2 { margin: 0 0 12px; font-size: 20px; font-weight: 500; }
@@ -762,9 +760,16 @@ dialog#app-dialog::backdrop { background: #1119; }
 #app-dialog form { display: grid; gap: 12px; }
 #app-dialog h2 { margin: 0; font-size: 22px; font-weight: 500; }
 #app-dialog p { margin: 0; line-height: 1.45; }
+#app-dialog h2, #app-dialog p, #app-dialog button { overflow-wrap: anywhere; min-width: 0; }
 #app-dialog label { display: grid; gap: 6px; }
 #app-dialog input { min-height: 48px; padding: 8px 12px; font: inherit; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); color: var(--ink); }
 .dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+dialog#app-dialog { max-height: calc(100dvh - 32px); overflow-y: auto; }
+/* Avec un champ à remplir, le dialogue reste en haut : le clavier ne cache jamais les boutons. */
+dialog#app-dialog.has-field { margin-top: max(16px, env(safe-area-inset-top)); }
+.dialog-actions .button { flex: 1 1 auto; min-height: 52px; }
+.dialog-actions.stacked { flex-direction: column; }
+.dialog-actions.stacked .button { width: 100%; min-height: 56px; font-size: 18px; }
 .update-banner { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:10px 16px; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:var(--card); font-size:14px; }
 .camera-form { display:grid; gap:12px; }
 #camera-dialog { width:min(94vw,600px); border:1px solid var(--line); border-radius:20px; padding:16px; color:var(--ink); background:var(--paper); }

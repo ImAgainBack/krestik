@@ -16,6 +16,7 @@ import { renderPalette } from "./ui/palette.js";
 import { setupInventory } from "./ui/inventory.js";
 import { createStitchView, isBusy as stitchBusy } from "./ui/stitch.js";
 import { exportPattern, printPattern } from "./ui/export.js";
+import { buildPatternPdf, pdfFileName } from "./ui/pdf.js";
 import { dmcNameRu } from "./i18n/dmc-names-ru.js";
 
 const worker = new Worker("./js/worker.js", { type: "module" });
@@ -454,6 +455,45 @@ $("#open-inventory").addEventListener("click", async () => {
 $("#export-png").addEventListener("click", () => exportPattern(currentProject));
 $("#palette-export-png").addEventListener("click", () => currentProject && exportPattern(currentProject));
 $("#palette-print").addEventListener("click", () => currentProject && printPattern(currentProject));
+$("#palette-pdf").addEventListener("click", savePdf);
+async function savePdf() {
+  const button = $("#palette-pdf");
+  if (!currentProject || button.disabled) return;
+  // Copie figée : une modification de la palette pendant la fabrication ne mélange pas deux schémas.
+  const { pattern, settings, name } = currentProject;
+  const project = { name, settings: { ...settings }, pattern: { ...pattern, cells: pattern.cells.slice(), colors: pattern.colors.map((color) => ({ ...color })) } };
+  button.disabled = true;
+  button.textContent = "Готовим PDF…";
+  let file = null;
+  try {
+    const blob = await buildPatternPdf(project, (done, total) => { button.textContent = `Готовим PDF… ${done} из ${total}`; });
+    file = new File([blob], pdfFileName(project), { type: "application/pdf" });
+  } catch {}
+  button.disabled = false;
+  button.textContent = "Сохранить PDF";
+  if (!file) {
+    await showDialog({ title: "Не удалось сделать PDF", message: "Попробуйте ещё раз или выберите «Печать»", actions: [{ value: "ok", label: "Понятно" }] });
+    return;
+  }
+  // Le téléchargement part d'un bouton du dialogue : Chrome n'accepte un fichier que juste
+  // après un toucher, et une grande schéma peut prendre plus de quelques secondes.
+  const canShare = Boolean(navigator.share && navigator.canShare?.({ files: [file] }));
+  const actions = [{ value: "save", label: "Сохранить в телефон", primary: true }];
+  if (canShare) actions.push({ value: "share", label: "Отправить" });
+  actions.push({ value: "cancel", label: "Закрыть" });
+  const choice = await showDialog({ title: "PDF готов", message: `Файл «${file.name}» попадёт в папку «Загрузки». Его можно открыть, распечатать или отправить`, actions, stacked: true });
+  if (choice.value === "save") {
+    const url = URL.createObjectURL(file);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = file.name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+  if (choice.value === "share") {
+    try { await navigator.share({ files: [file], title: project.name }); } catch {}
+  }
+}
 $("#palette-display-mode").addEventListener("change", event => {
   if (stitch.setDisplayMode) stitch.setDisplayMode(event.target.value);
   else { $("#display-mode").value = event.target.value === "all" ? "both" : event.target.value; $("#display-mode").dispatchEvent(new Event("change", { bubbles: true })); }
