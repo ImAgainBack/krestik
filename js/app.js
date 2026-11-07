@@ -6,6 +6,7 @@ import {
   getSetting,
   saveSetting,
 } from "./storage.js";
+import { threadPalette } from "./engine/palettes.js";
 import { estimateSkeins } from "./engine/index.js";
 import { $, $$, escapeHtml, makeId, showDialog } from "./ui/dom.js";
 import { renderProjects } from "./ui/projects.js";
@@ -108,6 +109,9 @@ function settings() {
   const cols = Math.max(1, Math.min(400, Number($("#cols").value) || 40));
   const rows = Math.max(1, Math.min(400, Number($("#rows").value) || 40));
   const options = {
+    brand: $("#brand-options").dataset.brand || "dmc",
+    maxBlends: selectedMode() === "photo" ? Number($("#max-blends").value) : 0,
+    excludedCodes: [...excludedCodes],
     mode: selectedMode(),
     cols,
     rows,
@@ -120,14 +124,13 @@ function settings() {
   };
   const legend = selectedMode() === "chart" ? settingsUI?.legendCodes() || [] : [];
   if (legend.length) { options.allowedCodes = legend; options.maxColors = legend.length; }
-  else if ($("#only-stock").checked) options.allowedCodes = inventory.getOwned();
+  else if ($("#only-stock").checked) options.allowedCodes = inventory.getOwned(options.brand);
   if (excludedCodes.size)
-    options.allowedCodes = (options.allowedCodes || allDmcCodes).filter(
+    options.allowedCodes = (options.allowedCodes || threadPalette(options.brand).map(c => c[0])).filter(
       (code) => !excludedCodes.has(code),
     );
   return options;
 }
-const allDmcCodes = [];
 let inventory;
 const crop = setupCrop();
 const stitch = createStitchView({ save: saveProject, getSkeins: () => "" });
@@ -213,6 +216,8 @@ async function restoreDraft(draft) {
   await loadFile(new File([draft.source], "черновик.jpg", { type: draft.source.type || "image/jpeg" }));
   thumbnail = draft.thumbnail || thumbnail;
   if (draft.settings) {
+    settingsUI.setBrand(draft.settings.brand || "dmc");
+    $("#max-blends").value = String(draft.settings.maxBlends ?? 0);
     settingsUI.selectMode(draft.mode === "chart" ? "chart" : "photo");
     $("#cols").value = String(draft.settings.cols || 40); $("#rows").value = String(draft.settings.rows || 40);
     $("#max-colors").value = String(draft.settings.maxColors || 20); $("#max-colors-out").value = $("#max-colors").value;
@@ -323,7 +328,7 @@ async function patternWithReplacements(image, options) {
   let pattern = await ask("convert", { image, options });
   for (const [from, to] of manualReplacements) {
     if (pattern.colors.some((color) => color.code === from))
-      pattern = await ask("replace", { pattern, from, to });
+      pattern = await ask("replace", { pattern, from, to, brand: options.brand });
   }
   return pattern;
 }
@@ -389,6 +394,8 @@ async function renderProjectPalette() {
   if (!currentProject) return;
   renderPalette(currentProject.pattern, {
     checked: stitch.checked,
+    brand: currentProject.settings.brand || "dmc",
+    aida: currentProject.settings.aida || 14,
     skeins: (count) => Math.ceil(estimateSkeins(
         count,
         Number(currentProject.settings?.aida || 14),
@@ -409,17 +416,22 @@ async function renderProjectPalette() {
         if (action === "replace") {
           manualReplacements.set(code, replacement);
           currentProject.replacements = [...manualReplacements];
-          currentProject.pattern = await ask("replace", { pattern: currentProject.pattern, from: code, to: replacement });
+          currentProject.pattern = await ask("replace", { pattern: currentProject.pattern, from: code, to: replacement, brand: currentProject.settings.brand });
         }
         if (action === "exclude") {
           status.textContent = "Пересчитываем…";
           excludedCodes.add(code);
           currentProject.excludedCodes = [...excludedCodes];
+          if (code.includes("+") || !currentProject.source) {
+            currentProject.pattern = await ask("remove", {pattern: currentProject.pattern, code, brand: currentProject.settings.brand});
+          } else {
           currentImage = await imageFromBlob(currentProject.source);
           currentProject.pattern = await patternWithReplacements(currentImage, {
             ...currentProject.settings,
-            allowedCodes: (currentProject.settings.allowedCodes || allDmcCodes).filter((item) => !excludedCodes.has(item)),
+            excludedCodes: [...excludedCodes],
+            allowedCodes: (currentProject.settings.allowedCodes || threadPalette(currentProject.settings.brand).map(c => c[0])).filter((item) => !excludedCodes.has(item)),
           });
+          }
         }
         currentProject.updated = Date.now();
         await saveProject(currentProject);
@@ -443,7 +455,7 @@ async function renderProjectPalette() {
       } finally { actions.forEach((button) => { button.disabled = false; }); if (status?.textContent === "Пересчитываем…") status.textContent = ""; }
     },
   });
-  $("#palette-color-filter").innerHTML = `<option value="">Все цвета</option>` + currentProject.pattern.colors.map(item => `<option value="${escapeHtml(item.code)}">${escapeHtml(item.code)} · ${escapeHtml(dmcNameRu(item.code, item.name))}</option>`).join("");
+  $("#palette-color-filter").innerHTML = `<option value="">Все цвета</option>` + currentProject.pattern.colors.map(item => `<option value="${escapeHtml(item.code)}">${escapeHtml(item.code)} · ${escapeHtml(currentProject.settings.brand === "gamma" ? item.name : dmcNameRu(item.code, item.name))}</option>`).join("");
   $("#palette-display-mode").value = stitch.getDisplayMode?.() || "all";
   $("#palette-color-filter").value = stitch.getColorFilter?.() || "";
 }
@@ -538,13 +550,12 @@ $$("[data-screen]").forEach((button) =>
 $("#aida").addEventListener("change", () => {
   currentProject && (currentProject.settings.aida = Number($("#aida").value));
 });
+$("#brand-options").addEventListener("change", async () => { await saveSetting("threadBrand", $("#brand-options").dataset.brand); if($("#only-stock").checked) await inventory.open(); });
 $("#only-stock").addEventListener("change", async () => {
   $("#only-stock").checked && (await inventory.open());
 });
 
 async function initialize() {
-  const codes = await import("./engine/dmc.js");
-  codes.DMC.forEach(([code]) => allDmcCodes.push(code));
   await refreshProjects();
   const route = location.hash.slice(1).split("/");
   if (route[0] === "stitch" && projects.length) {
@@ -558,6 +569,7 @@ async function initialize() {
     history.replaceState({ pointCroix: true, screen: "home" }, "", `${location.pathname}${location.search}#home`);
     renderScreen("home");
   }
+  settingsUI.setBrand(await getSetting("threadBrand", "dmc"));
   if (route[0] !== "stitch") renderDraftCard(await getSetting("draft", null));
   if ("serviceWorker" in navigator)
     navigator.serviceWorker.register("./sw.js").catch(() => {});

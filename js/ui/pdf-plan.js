@@ -14,6 +14,8 @@ export function makeParts(p, sx, sy) {
       const v = p.cells[r * p.cols + c]; if (v !== 0xffff) used.add(v);
     }
     part.colors = [...used].sort((a, b) => a - b);
+    part.hasBlends = part.colors.some(i => p.colors[i].blend);
+    part.legend = part.hasBlends ? [...part.colors.filter(i => !p.colors[i].blend), null, ...part.colors.filter(i => p.colors[i].blend)] : part.colors;
     out.push(part);
   }
   return out;
@@ -23,21 +25,21 @@ export function layoutFor(p, sx, sy, orient) {
   const W = orient === "land" ? 297 : 210, H = orient === "land" ? 210 : 297;
   const parts = makeParts(p, sx, sy), m = M;
   const w = Math.max(...parts.map(t => t.vc1 - t.vc0)), h = Math.max(...parts.map(t => t.vr1 - t.vr0));
-  const n = Math.max(...parts.map(t => t.colors.length)), gridTop = m + TOP + NUM;
+  const n = Math.max(...parts.map(t => t.legend.length)), rowH = parts.some(t => t.hasBlends) ? 7.2 : ROWH, gridTop = m + TOP + NUM;
   // Key below the grid…
   const cols = Math.max(1, Math.floor((W - 2 * m) / 65));
-  const legH = GAP + Math.max(ROWH, Math.ceil(n / cols) * 4.2);
+  const legH = GAP + Math.max(ROWH, Math.ceil(n / cols) * (rowH === ROWH ? 4.2 : rowH));
   let availW = W - 2 * m - NUM;
   let best = { side: "bottom", availW, cell: Math.min(6, availW / w, (H - gridTop - legH - m) / h) };
   // …or beside it, whichever gives bigger cells.
   for (let c = 1; c <= 3; c++) {
-    if (Math.ceil(n / c) * ROWH > H - gridTop - m) continue;
-    const legW = c * 40;
+    if (Math.ceil(n / c) * rowH > H - gridTop - m) continue;
+    const legW = c * (parts.some(t => t.hasBlends) ? 50 : 40);
     availW = W - 2 * m - NUM - legW - 5;
     const cell = Math.min(6, availW / w, (H - gridTop - m) / h);
     if (cell > best.cell + 0.01) best = { side: "right", availW, cell, legW };
   }
-  return { sx, sy, orient, W, H, parts, total: parts.length, m, ...best };
+  return { sx, sy, orient, W, H, parts, total: parts.length, m, rowH, ...best };
 }
 function splitPlan(p, sx, sy) {
   const a = layoutFor(p, sx, sy, "port"), b = layoutFor(p, sx, sy, "land");
@@ -86,8 +88,8 @@ export function legendLayout(pl, part) {
   box.h = pl.H - pl.m - box.y;
   let pick = null;
   for (let c = 1; c <= Math.max(1, Math.floor(box.w / 50)); c++) {
-    const rh = Math.min(7, box.h / Math.max(1, Math.ceil(part.colors.length / c)));
-    if (rh >= 4.2) { pick = { c, rh }; break; }
+    const rh = Math.min(part.hasBlends ? 9 : 7, box.h / Math.max(1, Math.ceil((part.legend || part.colors).length / c)));
+    if (rh >= (part.hasBlends ? 7.2 : 4.2)) { pick = { c, rh }; break; }
     if (!pick || rh > pick.rh + 0.01) pick = { c, rh };
   }
   return { ...box, ...pick };

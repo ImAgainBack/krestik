@@ -1,4 +1,5 @@
 import { symbolFor } from "./symbols.js";
+import { brandName } from "../engine/palettes.js";
 import { dmcNameRu } from "../i18n/dmc-names-ru.js";
 import { plan, TOP, NUM, ROWH, legendLayout } from "./pdf-plan.js";
 const PT_W = 595.28,
@@ -106,19 +107,28 @@ export function drawPage(canvas, s, project, pl, k, mode = "color", thumbnail = 
 
   // Key: only this sheet's colors, stretched to fill the space left on the sheet.
   const box = legendLayout(pl, part), pick = box;
-  const f = Math.min(1.7, pick.rh / ROWH), colW = box.w / pick.c, sw = 3.8 * f;
-  part.colors.forEach((ci, idx) => {
+  const f = Math.min(part.hasBlends ? 1.2 : 1.7, pick.rh / ROWH), colW = box.w / pick.c, sw = 3.8 * f;
+  x.fillStyle = "#111"; x.textAlign = "left"; x.font = FONT(2.7, "bold");
+  x.fillText(`Нитки ${brandName(project.settings?.brand)}`, box.x, box.y - 1.4);
+  (part.legend || part.colors).forEach((ci, idx) => {
     const col = idx % pick.c, row = Math.floor(idx / pick.c);
-    const lx = box.x + col * colW, ly = box.y + row * pick.rh, hex = p.colors[ci].hex;
+    const lx = box.x + col * colW, ly = box.y + row * pick.rh;
+    if (ci === null) {
+      x.fillStyle="#111";x.textAlign="left";x.font=FONT(2.4,"bold");x.textBaseline="middle";
+      x.fillText("Смешанные нити — по одной",lx,ly+2.1);
+      x.fillText("нити каждого цвета",lx,ly+5);return;
+    }
+    const color=p.colors[ci], hex=color.hex;
     if (mode === "color") { x.fillStyle = "#" + hex.replace(/^#/, ""); x.fillRect(lx, ly, sw, sw); }
     x.strokeStyle = "#555"; x.lineWidth = 0.15; x.strokeRect(lx, ly, sw, sw);
     x.fillStyle = mode === "color" && isDark(hex) ? "#fff" : "#000";
     x.font = SYMFONT(3 * f); x.textAlign = "center"; x.textBaseline = "middle";
     x.fillText(symbolFor(ci), lx + sw / 2, ly + sw / 2 + 0.2 * f);
     x.textAlign = "left"; x.fillStyle = "#111"; x.font = FONT(3 * f, "bold");
-    x.fillText(p.colors[ci].code, lx + sw + 1.4 * f, ly + sw / 2);
-    const cw = x.measureText(p.colors[ci].code).width;
-    const name = dmcNameRu(p.colors[ci].code, p.colors[ci].name);
+    const codes=color.blend || [color.code];
+    codes.forEach((code,i)=>x.fillText(code, lx+sw+1.4*f, ly+sw/2+(i-(codes.length-1)/2)*3*f));
+    const cw = Math.max(...codes.map(code=>x.measureText(code).width));
+    const name = project.settings?.brand === "gamma" ? color.name : color.blend ? color.blend.map(code => dmcNameRu(code,code)).join(" + ") : dmcNameRu(color.code,color.name);
     const nx = lx + sw + 2.6 * f + cw, max = colW - (nx - lx) - 2;
     const base = 2.5 * f, min = base * 0.7;
     x.fillStyle = "#555";

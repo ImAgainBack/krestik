@@ -139,3 +139,5 @@ dialog#app-dialog.has-field { margin-top: max(16px, env(safe-area-inset-top)); }
 
 body:has(#stitch-screen:not(.hidden)) #update-banner { display:none; }
 #project-name-error { color:var(--danger); }
+/* Advanced colour controls retain the same touch target as choice cards. */
+#max-colors { width:100%; min-height:48px; }

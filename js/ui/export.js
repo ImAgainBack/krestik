@@ -56,7 +56,7 @@ export function exportPattern(project) {
     context.fillStyle = "#20231f";
     context.font = "14px sans-serif";
     context.fillText(
-      `${symbolFor(index)}  ${color.code} ${dmcNameRu(color.code, color.name)} · ${crosses(color.count)}`,
+      `${symbolFor(index)}  ${color.code} ${project.settings?.brand === "gamma" ? color.name : dmcNameRu(color.code, color.name)} · ${crosses(color.count)}`,
       margin + 26,
       y,
     );

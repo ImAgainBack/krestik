@@ -23,8 +23,8 @@ self.onmessage = async ({ data }) => {
     }
     if (type === "convert") result = engine.imageToPattern(data.image, data.options);
     if (type === "replace")
-      result = engine.replaceColor(data.pattern, data.from, data.to);
-    if (type === "remove") result = engine.removeColor(data.pattern, data.code);
+      result = engine.replaceColor(data.pattern, data.from, data.to, data.brand);
+    if (type === "remove") result = engine.removeColor(data.pattern, data.code, data.brand);
     if (type === "skeins")
       result = engine.estimateSkeins(data.count, data.aida, data.strands);
     self.postMessage({ id, result });

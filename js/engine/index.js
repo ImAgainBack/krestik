@@ -1,4 +1,4 @@
-/** Pure Worker/Node engine. Backward-compatible SPEC.md API; no new options/fields.
+/** Pure Worker/Node engine. Omitted brand and maxBlends retain DMC solids.
  * Chart + emptyBackground: a supplied white legend entry (B5200/Blanc/3865/Ecru) preserves neutral
  * symbols on paper using central two-axis residual energy (straight rules removed).
  * Unmarked bright paper stays empty. emptyBackground=false still fills all cells.
@@ -20,20 +20,26 @@
  * Chart and foreground-on-fabric palette selection retain weighted k-means++;
  * CIEDE2000 maps those centres to DMC. Chart sampling and cleanup stay unchanged.
  */
-import { DMC } from "./dmc.js";
+import { threadPalette } from "./palettes.js";
+import { addBlends, pruneBlends } from "./blends.js";
 import { rgbToLab, rgbToOKLab, deltaE2000 } from "./color.js";
 import { validateImage } from "./geometry.js";
 import { readCells } from "./sample.js";
 import { quantize, ditherCells, cleanupCells, cleanupPhoto } from "./quantize.js";
 export { DMC } from "./dmc.js";
 export { detectGrid, detectGridBounds } from "./grid.js";
-const palette = DMC.map(([code, name, hex]) => {
+const palettes = new Map();
+function getPalette(brand = "dmc") {
+  if (palettes.has(brand)) return palettes.get(brand);
+  const palette = threadPalette(brand).map(([code, name, hex]) => {
   const rgb = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
   return { code, name, hex, rgb, lab: rgbToLab(...rgb), oklab: rgbToOKLab(...rgb) };
 });
-const byCode = new Map(palette.map((c) => [c.code, c]));
-export function dmcByCode(code) {
-  const c = byCode.get(String(code));
+  palettes.set(brand, palette);
+  return palette;
+}
+export function dmcByCode(code, brand = "dmc") {
+  const c = getPalette(brand).find(c => c.code === String(code));
   return c
     ? { code: c.code, name: c.name, hex: c.hex, rgb: [...c.rgb] }
     : undefined;
@@ -47,8 +53,8 @@ function pack(cols, rows, cells, colors) {
     map = new Uint16Array(colors.length);
   const result = order.map((i, j) => {
     map[i] = j;
-    const { code, name, hex } = colors[i];
-    return { code, name, hex, count: counts[i] };
+    const { code, name, hex, blend } = colors[i];
+    return { code, name, hex, ...(blend ? { blend: [...blend] } : {}), count: counts[i] };
   });
   for (let i = 0; i < cells.length; i++)
     if (cells[i] !== 65535) cells[i] = map[cells[i]];
@@ -79,6 +85,10 @@ export function imageToPattern(img, opts) {
     cleanup > 3
   )
     throw new RangeError("Invalid dither/cleanup");
+  const palette = getPalette(opts.brand);
+  const byCode = new Map(palette.map(c => [c.code, c]));
+  const maxBlends = opts.maxBlends ?? 0;
+  if (!Number.isInteger(maxBlends) || maxBlends < 0 || maxBlends > 25) throw new RangeError("Invalid pattern options");
   let allowed = palette;
   if (opts.allowedCodes !== undefined) {
     if (!Array.isArray(opts.allowedCodes) || !opts.allowedCodes.length)
@@ -91,11 +101,11 @@ export function imageToPattern(img, opts) {
   opts.onProgress?.(0);
   const symbolMask = mode === "chart" && opts.emptyBackground &&
     opts.allowedCodes !== undefined &&
-    allowed.some((c) => ["B5200", "Blanc", "3865", "Ecru"].includes(c.code))
+    allowed.some((c) => (opts.brand === "gamma" ? ["0415"] : ["B5200", "Blanc", "3865", "Ecru"]).includes(c.code))
     ? new Uint8Array(opts.cols * opts.rows) : undefined;
   const rgb = readCells(img, { ...opts, mode }, symbolMask);
   opts.onProgress?.(0.35);
-  const { indices, selected } = quantize(
+  let { indices, selected } = quantize(
     rgb,
     opts.maxColors,
     allowed,
@@ -104,6 +114,7 @@ export function imageToPattern(img, opts) {
     symbolMask,
     opts.cols,
   );
+  if (mode === "photo" && maxBlends) selected = addBlends(rgb, indices, selected, maxBlends, opts.excludedCodes);
   opts.onProgress?.(0.8);
   if (mode === "photo" && dither && selected.length)
     ditherCells(rgb, indices, selected, opts.cols, dither, allowed);
@@ -111,12 +122,13 @@ export function imageToPattern(img, opts) {
     if (mode === "photo") cleanupPhoto(rgb, indices, selected, opts.cols, opts.rows, cleanup);
     else cleanupCells(indices, opts.cols, opts.rows, cleanup);
   }
+  if (selected.some(c => c.blend)) selected = pruneBlends(rgb, indices, selected);
   const result = pack(opts.cols, opts.rows, indices, selected);
   opts.onProgress?.(1);
   return result;
 }
-export function replaceColor(pattern, fromCode, toCode) {
-  const color = byCode.get(String(toCode));
+export function replaceColor(pattern, fromCode, toCode, brand = "dmc") {
+  const color = pattern.colors.find(c => c.code === String(toCode)) || getPalette(brand).find(c => c.code === String(toCode));
   if (!color) throw new RangeError("Unknown DMC code");
   const colors = pattern.colors.map((c) => ({ ...c })),
     cells = pattern.cells.slice(),
@@ -130,7 +142,8 @@ export function replaceColor(pattern, fromCode, toCode) {
   for (let i = 0; i < cells.length; i++) if (cells[i] === from) cells[i] = to;
   return pack(pattern.cols, pattern.rows, cells, colors);
 }
-export function removeColor(pattern, code) {
+export function removeColor(pattern, code, brand = "dmc") {
+  const colorLab = c => rgbToLab(...[0,2,4].map(i => parseInt(c.hex.replace(/^#/, "").slice(i,i+2),16)));
   const from = pattern.colors.findIndex((c) => c.code === String(code));
   if (from < 0)
     return pack(
@@ -139,18 +152,18 @@ export function removeColor(pattern, code) {
       pattern.cells.slice(),
       pattern.colors,
     );
-  const src = byCode.get(String(code));
+  const src = pattern.colors[from];
   let best = null,
     md = Infinity;
   for (const c of pattern.colors) {
     if (c.code === String(code)) continue;
-    const d = deltaE2000(src.lab, byCode.get(c.code).lab);
+    const d = deltaE2000(colorLab(src), colorLab(c));
     if (d < md) {
       md = d;
       best = c;
     }
   }
-  if (best) return replaceColor(pattern, code, best.code);
+  if (best) return replaceColor(pattern, code, best.code, brand);
   return {
     cols: pattern.cols,
     rows: pattern.rows,

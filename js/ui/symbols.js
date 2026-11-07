@@ -1,4 +1,4 @@
-// 80 значков distincts (max de couleurs d'une schéma) : les 16 premiers ne changent pas,
+// Existing symbols keep their indices; additions cover 80 solids + 25 blends.
 // pour que les broderies existantes gardent leurs значки.
 const BASE = ["×", "○", "△", "□", "＋", "◇", "/", "•", "☆", "∧", "⊙", "⌁", "∩", "Ｘ", "▽", "◆"];
 const EXTRA = [
@@ -7,5 +7,6 @@ const EXTRA = [
   ..."abdefghkmnqrstuy",
   ..."БГДЖИЛПФЦЧШЩЭЮЯЫЪЬ",
 ];
-export const SYMBOLS = [...BASE, ...EXTRA];
+const ADDED = [..."012356789CEFLMNPRSTUVWXYZceijlopvwxzβγδεζηθικλμνξπρστυφχψω"].filter(c => ![...BASE, ...EXTRA].includes(c));
+export const SYMBOLS = [...BASE, ...EXTRA, ...ADDED];
 export const symbolFor = (index) => SYMBOLS[index % SYMBOLS.length];

@@ -1,4 +1,5 @@
-import { DMC } from "../engine/dmc.js";
+import { threadPalette, brandName } from "../engine/palettes.js";
+import { dmcByCode } from "../engine/index.js";
 import { estimateSkeins } from "../engine/index.js";
 import { $, escapeHtml, showDialog } from "./dom.js";
 import { symbolFor } from "./symbols.js";
@@ -6,7 +7,10 @@ import { ru, formatNumber, formatSkeins, formatStitches } from "../i18n/ru.js";
 import { dmcNameRu, dmcSearchText } from "../i18n/dmc-names-ru.js";
 const darkHex = hex => { const n = parseInt(String(hex).replace(/^#/, ""), 16); return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 110; };
 
-export function renderPalette(pattern, { checked, onAction, skeins }) {
+export function renderPalette(pattern, { checked, onAction, skeins, brand = "dmc", aida = 14 }) {
+  const DMC = threadPalette(brand);
+  const nameFor = (code,name) => brand === "gamma" ? name : code.includes("+") ? code.split("+").map(c => {const t=dmcByCode(c,brand);return dmcNameRu(c,t?.name || c);}).join(" + ") : dmcNameRu(code,name);
+  $(".palette-panel-head b").textContent = `Нитки ${brandName(brand)}`;
   const list = $("#palette-list");
   let status = document.querySelector("#palette-status");
   if (!status) { status = document.createElement("p"); status.id = "palette-status"; status.className = "muted"; status.setAttribute("aria-live", "polite"); $(".palette-tools").after(status); }
@@ -24,7 +28,7 @@ export function renderPalette(pattern, { checked, onAction, skeins }) {
       const total = color.count ?? totals.get(index) ?? 0;
       const selected = DMC.map((item) => ({
         code: item[0],
-        name: dmcNameRu(item[0], item[1]),
+        name: nameFor(item[0], item[1]),
         english: item[1],
         hex: `#${item[2]}`,
       }));
@@ -35,17 +39,20 @@ export function renderPalette(pattern, { checked, onAction, skeins }) {
         }))
         .sort((a, b) => a.distance - b.distance)
         .slice(0, 8);
-      const skeinCount = Math.max(1, Math.ceil(skeins ? skeins(total) : estimateSkeins(total, 14)));
-      return `<article class="palette-row" data-code="${escapeHtml(color.code)}"><span class="swatch${darkHex(color.hex) ? " dark" : ""}" style="background:${escapeHtml(color.hex.startsWith("#") ? color.hex : `#${color.hex}`)}">${symbolFor(index)}</span>
-      <div class="palette-meta"><b>${escapeHtml(color.code)}</b> <span>${escapeHtml(dmcNameRu(color.code, color.name))}</span></div>
+      const componentCount = color.blend ? total / 2 : total + pattern.colors.filter(c => c.blend?.includes(color.code)).reduce((sum,c) => sum+c.count/2,0);
+      const split = color.blend?.map(c=>dmcByCode(c,brand)?.hex);
+      const background = split ? `linear-gradient(90deg, #${split[0]} 50%, #${split[1]} 50%)` : (color.hex.startsWith("#") ? color.hex : `#${color.hex}`);
+      const skeinCount = Math.max(1, Math.ceil((skeins ? skeins(componentCount) : estimateSkeins(componentCount, aida))));
+      return `<article class="palette-row" data-code="${escapeHtml(color.code)}"><span class="swatch${darkHex(color.hex) ? " dark" : ""}" style="background:${escapeHtml(background)}">${symbolFor(index)}</span>
+      <div class="palette-meta"><b>${escapeHtml(color.code.replace("+", " + "))}</b>${color.blend ? "<small>по одной нити каждого цвета</small>" : ""} <span>${escapeHtml(nameFor(color.code, color.name))}</span></div>
       <button class="palette-expand icon-button" aria-label="Действия с ниткой ${escapeHtml(color.code)}" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button><small class="palette-counts"><span>${formatStitches(total)} · ${formatSkeins(skeinCount)}</span><span>вышито ${formatNumber(completed)}</span></small><div class="palette-actions"><button class="button secondary" data-action="highlight">${ru.highlight}</button><button class="button secondary" data-action="exclude">${ru.missingColor}</button><button class="button secondary" data-action="replace">${ru.replace}</button>
-      <select aria-label="Похожие оттенки для ${escapeHtml(color.code)}" class="replace-select"><option value="">Похожий цвет DMC…</option>${suggestions.map((item) => `<option value="${item.code}">${item.code} ${escapeHtml(item.name)}</option>`).join("")}</select><input class="replace-search" list="dmc-options" placeholder="Код или название…" aria-label="Поиск цвета DMC"></div></article>`;
+      <select aria-label="Похожие оттенки для ${escapeHtml(color.code)}" class="replace-select"><option value="">Похожий цвет ${brandName(brand)}…</option>${suggestions.map((item) => `<option value="${item.code}">${item.code} ${escapeHtml(item.name)}</option>`).join("")}</select><input class="replace-search" list="dmc-options" placeholder="Код или название…" aria-label="Поиск цвета ${brandName(brand)}"></div></article>`;
     })
     .join("");
   const datalist = document.createElement("datalist");
   datalist.id = "dmc-options";
   datalist.innerHTML = DMC.map(
-    ([code, name]) => `<option value="${code}" data-search="${escapeHtml(dmcSearchText(code, name))}">${escapeHtml(dmcNameRu(code, name))} · ${escapeHtml(name)}</option>`,
+    ([code, name]) => `<option value="${code}" data-search="${escapeHtml((brand === "gamma" ? `${code} ${name}` : dmcSearchText(code, name)))}">${escapeHtml(nameFor(code, name))} · ${escapeHtml(name)}</option>`,
   ).join("");
   list.append(datalist);
   let dialog = document.querySelector("#replace-dialog");
@@ -66,12 +73,12 @@ export function renderPalette(pattern, { checked, onAction, skeins }) {
         return;
       }
       const choices = [...row.querySelector(".replace-select").options].slice(1);
-      dialog.innerHTML = `<form method="dialog"><h2>Заменить ${escapeHtml(row.dataset.code)}</h2><label>Поиск<input id="replace-query" list="dmc-options" placeholder="Код или название DMC"></label><label>Похожие оттенки<select id="replace-choice">${choices.map(option => `<option value="${option.value}">${escapeHtml(option.textContent)}</option>`).join("")}</select></label><div class="replace-suggestions">${choices.map(option => `<button type="button" data-code="${option.value}">${escapeHtml(option.textContent)}</button>`).join("")}</div><button value="cancel">Отмена</button><button id="replace-confirm" value="confirm">${ru.replace}</button></form>`;
+      dialog.innerHTML = `<form method="dialog"><h2>Заменить ${escapeHtml(row.dataset.code)}</h2><label>Поиск<input id="replace-query" list="dmc-options" placeholder="Код или название ${brandName(brand)}"></label><label>Похожие оттенки<select id="replace-choice">${choices.map(option => `<option value="${option.value}">${escapeHtml(option.textContent)}</option>`).join("")}</select></label><div class="replace-suggestions">${choices.map(option => `<button type="button" data-code="${option.value}">${escapeHtml(option.textContent)}</button>`).join("")}</div><button value="cancel">Отмена</button><button id="replace-confirm" value="confirm">${ru.replace}</button></form>`;
       dialog.querySelector("form").addEventListener("submit", event => {
         if (event.submitter?.id !== "replace-confirm") return;
         event.preventDefault();
         const query = dialog.querySelector("#replace-query").value.trim();
-        const match = query ? DMC.find(([item, name]) => item.toUpperCase() === query.toUpperCase() || dmcSearchText(item, name).toLowerCase().includes(query.toLowerCase())) : null;
+        const match = query ? DMC.find(([item, name]) => item.toUpperCase() === query.toUpperCase() || (brand === "gamma" ? `${item} ${name}` : dmcSearchText(item, name)).toLowerCase().includes(query.toLowerCase())) : null;
         const code = match?.[0] || (query ? query.split(/\s+/)[0] : dialog.querySelector("#replace-choice").value);
         if (DMC.some(([item]) => item === code)) { dialog.close(); onAction("replace", row.dataset.code, code); }
       });

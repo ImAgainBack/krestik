@@ -80,7 +80,8 @@
           <div id="legend-swatches" class="legend-swatches" aria-live="polite"></div>
           <div id="live-preview" class="live-preview" aria-live="polite"><span id="preview-summary"></span><canvas id="preview-canvas" aria-label="Предварительный просмотр схемы"></canvas><details class="preview-colors"><summary><span id="preview-color-count">30 цветов</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary><div id="preview-palette"></div></details></div>
           <div id="photo-size-options" class="choice-group"><b>Размер вышивки</b><button type="button" data-size="10">Маленькая — около 10 см</button><button type="button" data-size="20">Средняя — около 20 см</button><button type="button" data-size="30">Большая — около 30 см</button></div>
-          <div id="color-options" class="choice-group"><b>Сколько цветов ниток</b><button type="button" data-colors="10">Мало — проще вышивать</button><button type="button" data-colors="20">Средне</button><button type="button" data-colors="35">Много — точнее</button></div>
+          <div id="brand-options" class="choice-group"><b>Какие у вас нитки?</b><button type="button" data-brand="dmc" class="active" aria-pressed="true">DMC</button><button type="button" data-brand="gamma" aria-pressed="false">Гамма<small>российские, ПАННА, Klart</small></button></div>
+          <div id="color-options" class="choice-group"><b>Сложность</b><button type="button" data-colors="10" data-blends="0">★ Простая<small>до 10 цветов, без смешивания</small></button><button type="button" data-colors="20" data-blends="4">★★ Средняя<small>до 20 цветов, немного смешанных нитей</small></button><button type="button" data-colors="30" data-blends="12">★★★ Сложная<small>до 30 цветов, смешанные нити</small></button><button type="button" data-colors="40" data-blends="25">★★★★ Как в наборе<small>до 40 цветов, много смешанных нитей</small></button></div>
           <p id="physical-size" class="muted"></p>
           <p id="size-summary" class="muted"></p>
           <p id="stitch-count" class="muted"></p>
@@ -114,7 +115,8 @@
               <option value="18">18 клеток на дюйм</option>
             </select>
           </div>
-          <label class="field hidden" id="max-colors-wrap">Число цветов <output id="max-colors-out">20</output><input id="max-colors" type="range" min="2" max="80" value="20" /></label>
+          <label class="field" id="max-colors-wrap">Число цветов <output id="max-colors-out">20</output><input id="max-colors" type="range" min="2" max="80" value="20" /></label>
+          <label class="field" id="blends-row">Смешанные нити (0 — без смешивания)<input id="max-blends" type="number" min="0" max="25" value="12"></label>
           <label id="dither-row" class="toggle-row"><input id="dither" type="checkbox" /> Плавные переходы цвета</label><p class="muted">Чередует крестики двух цветов, переходы мягче, но вышивать сложнее.</p>
           <label class="toggle-row"
             ><input id="empty-background" type="checkbox" checked /> Не вышивать фон</label
@@ -160,7 +162,7 @@
       </section>
       <section class="screen hidden" id="inventory-screen">
         <button class="back-button" data-screen="stitch"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 4-8 8 8 8"/></svg> Назад</button>
-        <h1>Мои нитки DMC</h1>
+        <h1 id="inventory-title">Мои нитки DMC</h1><div id="inventory-brand" class="choice-group" aria-label="Марка ниток"><button type="button" data-brand="dmc">DMC</button><button type="button" data-brand="gamma">Гамма</button></div>
         <label class="field" for="inventory-search">Код или название цвета</label><input
           id="inventory-search"
           class="search"

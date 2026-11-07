@@ -1,5 +1,5 @@
 import { $, $$ } from "./dom.js";
-import { DMC } from "../engine/dmc.js";
+import { threadPalette } from "../engine/palettes.js";
 import { ru, formatNumber, formatStitches } from "../i18n/ru.js";
 import { dmcNameRu } from "../i18n/dmc-names-ru.js";
 
@@ -8,7 +8,7 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
   const cols = $("#cols"), rows = $("#rows");
   let currentMode = $("input[name=mode]:checked")?.value || "chart";
   const modeSettings = new Map();
-  const fields = ["cols", "rows", "max-colors", "aida", "dither", "empty-background", "cleanup"];
+  const fields = ["cols", "rows", "max-colors", "max-blends", "aida", "dither", "empty-background", "cleanup"];
   const readModeSettings = () => Object.fromEntries(fields.map(id => {
     const input = $(`#${id}`);
     return [id, id === "dither" ? input.checked : input.type === "checkbox" ? input.checked : input.value];
@@ -23,8 +23,10 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
     $("#max-colors-out").value = $("#max-colors").value;
   };
   modeSettings.set(currentMode, readModeSettings());
-  const lookup = new Map(DMC.map(([code, name, hex]) => [code.toUpperCase(), { code, name: dmcNameRu(code, name), hex: `#${hex}` }]));
+  let brand = "dmc";
+  const makeLookup = () => new Map(threadPalette(brand).map(([code, name, hex]) => [code.toUpperCase(), { code, name: brand === "gamma" ? name : dmcNameRu(code, name), hex: `#${hex}` }]));
   const legendCodes = () => {
+    const lookup = makeLookup();
     const tokens = $("#legend-codes").value.trim().split(/[\s,;]+/).filter(Boolean);
     const codes = [], unknown = [];
     for (const token of tokens) {
@@ -46,8 +48,8 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
     const closestSize = [10, 20, 30].reduce((best, item) => Math.abs(item - cm) < Math.abs(best - cm) ? item : best, 10);
     $$("#photo-size-options [data-size]").forEach((button) => { const active = Number(button.dataset.size) === closestSize; button.classList.toggle("active", active); button.setAttribute("aria-pressed", String(active)); });
     const colors = Number($("#max-colors").value);
-    const closestColors = [10, 20, 35].reduce((best, item) => Math.abs(item - colors) < Math.abs(best - colors) ? item : best, 10);
-    $$("#color-options [data-colors]").forEach((button) => { const active = Number(button.dataset.colors) === closestColors; button.classList.toggle("active", active); button.setAttribute("aria-pressed", String(active)); });
+    const closestColors = [10, 20, 30, 40].reduce((best, item) => Math.abs(item - colors) < Math.abs(best - colors) ? item : best, 10);
+    $$("#color-options [data-colors]").forEach((button) => { const active = Number(button.dataset.colors) === closestColors && Number(button.dataset.blends) === Number($("#max-blends").value); button.classList.toggle("active", active); button.setAttribute("aria-pressed", String(active)); });
     $("#stitch-count").textContent = formatStitches(Number(cols.value) * Number(rows.value));
   }
   function ratio() {
@@ -79,7 +81,8 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
           context.fillStyle = color ? (color.hex.startsWith("#") ? color.hex : `#${color.hex}`) : paper;
           context.fillRect(x*scale,y*scale,Math.ceil(scale),Math.ceil(scale));
         }
-        $("#preview-color-count").textContent = `${formatNumber(pattern.colors.length)} цветов`;
+        const blends = pattern.colors.filter(c => c.blend).length;
+        $("#preview-color-count").textContent = `${pattern.cols} × ${pattern.rows} крестиков · ${pattern.colors.length - blends} цветов${blends ? ` + ${blends} смешанных` : ""}`;
         $("#preview-palette").innerHTML = pattern.colors.map(c => `<span title="${c.code} · ${c.name}" style="background:${c.hex.startsWith("#")?c.hex:`#${c.hex}`}"></span>`).join("");
       } catch { if (current === version) { $("#preview-summary").textContent = "Не удалось подготовить схему. Проверьте настройки."; $("#create-pattern").disabled = false; } }
     }, 250);
@@ -95,20 +98,22 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
   rows.addEventListener("change", () => { clampFields(); if($("#lock-ratio").checked && !detected) cols.value=String(Math.max(1,Math.min(400,Math.round(Number(rows.value)*ratio())))); remember(); schedule(); });
   $("#legend-codes").addEventListener("input", () => { legendCodes(); schedule(); });
   $("#max-colors").addEventListener("input", e => { $("#max-colors-out").value=e.target.value; remember(); schedule(); });
-  ["aida","dither","empty-background","cleanup"].forEach(id => $(`#${id}`).addEventListener("change", () => { remember(); schedule(); }));
+  ["max-blends","aida","dither","empty-background","cleanup"].forEach(id => $(`#${id}`).addEventListener("change", () => { remember(); schedule(); }));
   $("#photo-size-options").addEventListener("click", (event) => {
     const button = event.target.closest("[data-size]"); if (!button) return;
     const stitches = Math.max(1, Math.round(Number(button.dataset.size) / 2.54 * Number($("#aida").value)));
     cols.value = String(stitches); rows.value = String(Math.max(1, Math.round(stitches / ratio()))); detected = false; remember(); schedule(); cols.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  $("#color-options").addEventListener("click", (event) => { const button = event.target.closest("[data-colors]"); if (!button) return; $("#max-colors").value = button.dataset.colors; $("#max-colors-out").value = button.dataset.colors; remember(); schedule(); $("#max-colors").dispatchEvent(new Event("input", { bubbles: true })); });
+  $("#color-options").addEventListener("click", (event) => { const button = event.target.closest("[data-colors]"); if (!button) return; $("#max-blends").value = button.dataset.blends; $("#max-colors").value = button.dataset.colors; $("#max-colors-out").value = button.dataset.colors; remember(); schedule(); $("#max-colors").dispatchEvent(new Event("input", { bubbles: true })); });
+  $("#brand-options").addEventListener("click", event => { const button = event.target.closest("[data-brand]"); if (button) { setBrand(button.dataset.brand); $("#brand-options").dispatchEvent(new Event("change", {bubbles:true})); } });
+  function setBrand(value) { brand = value; threadPalette(brand); $("#brand-options").dataset.brand = brand; $$("#brand-options [data-brand]").forEach(button => { const active = button.dataset.brand === brand; button.classList.toggle("active", active); button.setAttribute("aria-pressed", String(active)); }); legendCodes(); schedule(); }
   $("#only-stock").addEventListener("change", schedule);
   $$("input[name=mode]").forEach(input => input.addEventListener("change", () => {
     if (!input.checked) return;
     modeSettings.set(currentMode, readModeSettings());
     currentMode = input.value;
     if (!modeSettings.has(currentMode)) modeSettings.set(currentMode, currentMode === "photo"
-      ? { ...readModeSettings(), cols: 100, rows: 100, "max-colors": 30, dither: false, "empty-background": false, cleanup: 1 }
+      ? { ...readModeSettings(), cols: 100, rows: 100, "max-colors": 30, "max-blends": 12, dither: false, "empty-background": false, cleanup: 1 }
       : { ...readModeSettings(), "empty-background": true, "max-colors": 20, dither: false, cleanup: 1 });
     writeModeSettings(modeSettings.get(currentMode));
     const grid = input.value === "chart" && input.checked;
@@ -118,6 +123,7 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
     $("#grid-detection").classList.toggle("hidden", input.value !== "chart");
     $("#dither-row").classList.toggle("hidden", input.value !== "photo" || !input.checked);
     $("#photo-size-options").classList.toggle("hidden", input.value !== "photo");
+    $("#blends-row").classList.toggle("hidden", input.value !== "photo");
     $("#color-options").classList.toggle("hidden", input.value !== "photo");
     $("#detect-grid").classList.toggle("hidden", !grid); $("#legend-row").classList.toggle("hidden", !grid);
     schedule();
@@ -131,15 +137,17 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
   $("#color-options").classList.toggle("hidden", selected?.value !== "photo");
   $("#legend-row").classList.toggle("hidden", selected?.value !== "chart");
   $("#detect-grid").classList.toggle("hidden", selected?.value !== "chart");
+  $("#blends-row").classList.toggle("hidden", selected?.value !== "photo");
   updatePhysicalSize();
   return {
+    setBrand,
     schedule,
     setDetected(value) { detected = value; remember(); },
     setPhotoDimensions(width, height) {
       const photo = {
         ...(modeSettings.get("photo") || readModeSettings()), cols: 100,
         rows: Math.max(1, Math.min(400, Math.round(100 * height / Math.max(1, width)))),
-        "max-colors": 30, dither: false, "empty-background": false, cleanup: 1,
+        "max-colors": 30, "max-blends": 12, dither: false, "empty-background": false, cleanup: 1,
       };
       modeSettings.set("photo", photo);
       if (currentMode === "photo") { writeModeSettings(photo); schedule(); }
