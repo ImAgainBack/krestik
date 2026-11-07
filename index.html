@@ -45,7 +45,7 @@
         <button class="back-button" data-screen="home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 4-8 8 8 8"/></svg> Мои вышивки</button>
         <div class="stepper"><b id="step-label">Шаг 1 из 2</b></div>
         <h1 id="wizard-heading">Новая вышивка</h1>
-        <label class="field">Название вышивки<input id="project-name" maxlength="60" value="Вышивка" /></label>
+        <label class="field">Название вышивки<input id="project-name" maxlength="60" placeholder="Например: Кот Барсик" aria-describedby="project-name-error" /><small id="project-name-error" role="alert"></small></label>
         <div id="upload-options" class="upload-options">
           <label class="upload-card"
             ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h3l2-2h6l2 2h3v12H4zM12 10a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"/></svg><b>Сфотографировать</b

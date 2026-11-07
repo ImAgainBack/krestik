@@ -1,6 +1,8 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --paper: #20241f;
+    --warning-bg: #49352d;
+    --warning-line: #d29b84;
     --card: #292e28;
     --ink: #f1efe6;
     --muted: #b3b7ad;

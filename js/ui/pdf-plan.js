@@ -25,8 +25,8 @@ export function layoutFor(p, sx, sy, orient) {
   const w = Math.max(...parts.map(t => t.vc1 - t.vc0)), h = Math.max(...parts.map(t => t.vr1 - t.vr0));
   const n = Math.max(...parts.map(t => t.colors.length)), gridTop = m + TOP + NUM;
   // Key below the grid…
-  const cols = Math.max(1, Math.floor((W - 2 * m) / 38));
-  const legH = GAP + Math.ceil(n / cols) * ROWH;
+  const cols = Math.max(1, Math.floor((W - 2 * m) / 65));
+  const legH = GAP + Math.max(ROWH, Math.ceil(n / cols) * 4.2);
   let availW = W - 2 * m - NUM;
   let best = { side: "bottom", availW, cell: Math.min(6, availW / w, (H - gridTop - legH - m) / h) };
   // …or beside it, whichever gives bigger cells.
@@ -85,9 +85,9 @@ export function legendLayout(pl, part) {
     : { x: pl.W - pl.m - pl.legW, y: gy, w: pl.legW };
   box.h = pl.H - pl.m - box.y;
   let pick = null;
-  for (let c = 1; c <= Math.max(1, Math.floor(box.w / 36)); c++) {
+  for (let c = 1; c <= Math.max(1, Math.floor(box.w / 50)); c++) {
     const rh = Math.min(7, box.h / Math.max(1, Math.ceil(part.colors.length / c)));
-    if (rh >= 5.6) { pick = { c, rh }; break; }
+    if (rh >= 4.2) { pick = { c, rh }; break; }
     if (!pick || rh > pick.rh + 0.01) pick = { c, rh };
   }
   return { ...box, ...pick };

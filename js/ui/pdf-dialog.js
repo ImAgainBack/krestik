@@ -10,7 +10,7 @@ export function createPdfDialog(onSave) {
   dialog.innerHTML = `<header><button class="button secondary" id="close-pdf" aria-label="Назад">←</button><h2>PDF схемы</h2></header>
     <div id="pdf-strip" aria-label="Листы схемы"></div><p id="pdf-counter" aria-live="polite"></p><div id="pdf-dots"></div>
     <fieldset><legend>Сколько листов</legend><div id="pdf-pages-options"></div><p id="pdf-cell-hint"></p></fieldset>
-    <fieldset><legend>Как печатать</legend><div class="pdf-modes"><button class="pdf-option" data-mode="color"><b>Цветная</b><small>цвет + значки</small></button><button class="pdf-option" data-mode="symbols"><b>Чёрно-белая</b><small>только значки</small></button></div></fieldset>
+    <fieldset><legend>Как печатать</legend><div class="pdf-modes"><button class="pdf-option" data-mode="color"><b>Цветная</b></button><button class="pdf-option" data-mode="symbols"><b>Значки ч/б</b></button></div></fieldset>
     <div class="pdf-actions"><button class="button primary" id="pdf-save">Сохранить PDF</button><button class="button secondary" id="pdf-print">Печать</button></div><p id="pdf-file"></p><p id="pdf-error" role="alert"></p>`;
   document.body.append(dialog);
   const zoom = document.createElement("dialog");
@@ -95,7 +95,7 @@ export function createPdfDialog(onSave) {
       .map((n, i) => {
         const mm = plan(p, n).cell,
           label = count(plan(p, n).total);
-        return `<button class="pdf-option" data-choice="${i}" aria-pressed="${same(n, pages)}">${same(n, rec) ? "<span>советуем</span>" : ""}<b>${label}</b><small>клетка ${fmt(mm)} мм</small><small>${mm >= 3 ? "крупно" : mm >= MIN_CELL ? "как в журнале" : "мелко"}</small></button>`;
+        return `<button class="pdf-option" data-choice="${i}" aria-pressed="${same(n, pages)}">${same(n, rec) ? "<span>советуем</span>" : ""}<b>${label}</b><small>${fmt(mm)} мм</small></button>`;
       })
       .join("");
     $("#pdf-cell-hint").classList.toggle("warn", pl.cell < MIN_CELL);

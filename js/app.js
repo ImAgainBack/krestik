@@ -161,7 +161,9 @@ function startNew() {
   manualReplacements = new Map();
   settingsUI.setDetected(false);
   $("#step-label").textContent = "Шаг 1 из 2";
-  $("#project-name").value = "Вышивка " + new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" }).format(new Date());
+  $("#project-name").value = "";
+  $("#project-name-error").textContent = "";
+  $("#project-name").removeAttribute("aria-invalid");
   $("#editor").classList.add("hidden");
   $("#upload-options").classList.remove("hidden");
   $("#loaded-source").classList.add("hidden");
@@ -202,7 +204,7 @@ async function restoreDraft(draft) {
   // Comme startNew : la création remplacera l'assistant dans l'historique (sinon « retour » y ramène).
   importSession = true;
   showScreen("wizard");
-  $("#project-name").value = draft.name || "Вышивка";
+  $("#project-name").value = draft.name ?? "";
   await loadFile(new File([draft.source], "черновик.jpg", { type: draft.source.type || "image/jpeg" }));
   thumbnail = draft.thumbnail || thumbnail;
   if (draft.settings) {
@@ -321,6 +323,16 @@ async function patternWithReplacements(image, options) {
   return pattern;
 }
 async function makePattern() {
+  const name = $("#project-name").value.trim();
+  if (!name) {
+    $("#project-name-error").textContent = "Напишите название вышивки";
+    $("#project-name").setAttribute("aria-invalid", "true");
+    $("#project-name").focus();
+    $("#project-name").scrollIntoView({ block: "center" });
+    return;
+  }
+  $("#project-name-error").textContent = "";
+  $("#project-name").removeAttribute("aria-invalid");
   if (!currentImage || !sourceBlob) return;
   $("#create-pattern").disabled = true;
   $("#create-pattern").textContent = "Создание схемы…";
@@ -328,7 +340,7 @@ async function makePattern() {
     const pattern = await patternWithReplacements(currentImage, settings());
     const project = {
       id: makeId(),
-      name: $("#project-name").value.trim() || ("Вышивка " + new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" }).format(new Date())),
+      name,
       source: sourceBlob,
       thumbnail,
       settings: settings(),

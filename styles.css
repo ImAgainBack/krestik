@@ -1,6 +1,8 @@
 :root {
   color-scheme: light dark;
   --paper: #f5f1e8;
+  --warning-bg: #fbeee9;
+  --warning-line: #b46d54;
   --card: #fffdf8;
   --ink: #292d27;
   --muted: #74796e;
