@@ -15,8 +15,9 @@ import { setupSettings } from "./ui/settings.js";
 import { renderPalette } from "./ui/palette.js";
 import { setupInventory } from "./ui/inventory.js";
 import { createStitchView, isBusy as stitchBusy } from "./ui/stitch.js";
-import { exportPattern, printPattern } from "./ui/export.js";
+import { exportPattern } from "./ui/export.js";
 import { buildPatternPdf, pdfFileName } from "./ui/pdf.js";
+import { createPdfDialog } from "./ui/pdf-dialog.js";
 import { dmcNameRu } from "./i18n/dmc-names-ru.js";
 
 const worker = new Worker("./js/worker.js", { type: "module" });
@@ -69,6 +70,7 @@ function showScreen(screen, { replace = false } = {}) {
   renderScreen(screen);
 }
 window.addEventListener("popstate", (event) => {
+  if (["pdf", "pdf-zoom"].includes(event.state?.overlay)) return;
   if (event.state?.pointCroix && event.state.overlay === "palette") {
     const dialog = document.querySelector("#replace-dialog");
     if (dialog?.open) dialog.close();
@@ -454,19 +456,16 @@ $("#open-inventory").addEventListener("click", async () => {
 });
 $("#export-png").addEventListener("click", () => exportPattern(currentProject));
 $("#palette-export-png").addEventListener("click", () => currentProject && exportPattern(currentProject));
-$("#palette-print").addEventListener("click", () => currentProject && printPattern(currentProject));
-$("#palette-pdf").addEventListener("click", savePdf);
-async function savePdf() {
-  const button = $("#palette-pdf");
-  if (!currentProject || button.disabled) return;
-  // Copie figée : une modification de la palette pendant la fabrication ne mélange pas deux schémas.
-  const { pattern, settings, name } = currentProject;
-  const project = { name, settings: { ...settings }, pattern: { ...pattern, cells: pattern.cells.slice(), colors: pattern.colors.map((color) => ({ ...color })) } };
+const pdfDialog = createPdfDialog(savePdf);
+$("#open-pdf").addEventListener("click", () => currentProject && pdfDialog.open(currentProject));
+async function savePdf(project, options) {
+  const button = $("#pdf-save");
+  if (button.disabled) return;
   button.disabled = true;
   button.textContent = "Готовим PDF…";
   let file = null;
   try {
-    const blob = await buildPatternPdf(project, (done, total) => { button.textContent = `Готовим PDF… ${done} из ${total}`; });
+    const blob = await buildPatternPdf(project, (done, total) => { button.textContent = `Готовим PDF… ${done} из ${total}`; }, options);
     file = new File([blob], pdfFileName(project), { type: "application/pdf" });
   } catch {}
   button.disabled = false;
@@ -502,9 +501,6 @@ $("#palette-color-filter").addEventListener("change", event => {
   if (stitch.setColorFilter) stitch.setColorFilter(event.target.value || null);
   else { $("#color-filter").value = event.target.value; $("#color-filter").dispatchEvent(new Event("change", { bubbles: true })); }
 });
-$("#print-pattern").addEventListener("click", () =>
-  printPattern(currentProject),
-);
 $("#nav-stitch").addEventListener("click", async () => {
   if (currentProject) showScreen("stitch");
   else if (projects.length) openProject(await getSetting("lastProjectId", projects[0].id));

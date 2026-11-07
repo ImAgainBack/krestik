@@ -1,4 +1,4 @@
-const CACHE_NAME = "krestik-v16";
+const CACHE_NAME = "krestik-v18";
 const FILES = [
   "./",
   "./index.html",
@@ -31,6 +31,8 @@ const FILES = [
   "./js/ui/stitch.js",
   "./js/ui/export.js",
   "./js/ui/pdf.js",
+  "./js/ui/pdf-plan.js",
+  "./js/ui/pdf-dialog.js",
   "./js/ui/backup.js",
   "./js/i18n/ru-stitch.js",
   "./js/ui/symbols.js",
