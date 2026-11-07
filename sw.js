@@ -1,4 +1,4 @@
-const CACHE_NAME = "krestik-v19";
+const CACHE_NAME = "krestik-v20";
 const FILES = [
   "./",
   "./index.html",

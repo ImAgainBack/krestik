@@ -4,11 +4,14 @@ import { $, escapeHtml, showDialog } from "./dom.js";
 import { symbolFor } from "./symbols.js";
 import { ru, formatNumber, formatSkeins, formatStitches } from "../i18n/ru.js";
 import { dmcNameRu, dmcSearchText } from "../i18n/dmc-names-ru.js";
+const darkHex = hex => { const n = parseInt(String(hex).replace(/^#/, ""), 16); return ((n >> 16) * 299 + ((n >> 8) & 255) * 587 + (n & 255) * 114) / 1000 < 110; };
 
 export function renderPalette(pattern, { checked, onAction, skeins }) {
   const list = $("#palette-list");
   let status = document.querySelector("#palette-status");
-  if (!status) { status = document.createElement("p"); status.id = "palette-status"; status.className = "muted"; status.setAttribute("aria-live", "polite"); $("#palette-panel").prepend(status); }
+  if (!status) { status = document.createElement("p"); status.id = "palette-status"; status.className = "muted"; status.setAttribute("aria-live", "polite"); $(".palette-tools").after(status); }
+  const totals = new Map();
+  for (const cell of pattern.cells) if (cell !== 0xffff) totals.set(cell, (totals.get(cell) || 0) + 1);
   const completedCounts = new Map();
   checked.forEach((index) => {
     const color = pattern.cells[index];
@@ -18,7 +21,7 @@ export function renderPalette(pattern, { checked, onAction, skeins }) {
   list.innerHTML = pattern.colors
     .map((color, index) => {
       const completed = completedCounts.get(index) || 0;
-      const total = color.count || 0;
+      const total = color.count ?? totals.get(index) ?? 0;
       const selected = DMC.map((item) => ({
         code: item[0],
         name: dmcNameRu(item[0], item[1]),
@@ -33,9 +36,9 @@ export function renderPalette(pattern, { checked, onAction, skeins }) {
         .sort((a, b) => a.distance - b.distance)
         .slice(0, 8);
       const skeinCount = Math.max(1, Math.ceil(skeins ? skeins(total) : estimateSkeins(total, 14)));
-      return `<article class="palette-row" data-code="${escapeHtml(color.code)}"><span class="swatch" style="background:${escapeHtml(color.hex.startsWith("#") ? color.hex : `#${color.hex}`)}">${symbolFor(index)}</span>
-      <div class="palette-meta"><b>${escapeHtml(color.code)} · ${escapeHtml(dmcNameRu(color.code, color.name))}</b><small>${formatStitches(total)} · вышито ${formatNumber(completed)} · ${formatSkeins(skeinCount)}</small></div>
-      <div class="palette-actions"><button class="button secondary" data-action="highlight">${ru.highlight}</button><button class="button secondary" data-action="exclude">${ru.missingColor}</button><button class="button secondary" data-action="replace">${ru.replace}</button>
+      return `<article class="palette-row" data-code="${escapeHtml(color.code)}"><span class="swatch${darkHex(color.hex) ? " dark" : ""}" style="background:${escapeHtml(color.hex.startsWith("#") ? color.hex : `#${color.hex}`)}">${symbolFor(index)}</span>
+      <div class="palette-meta"><b>${escapeHtml(color.code)}</b> <span>${escapeHtml(dmcNameRu(color.code, color.name))}</span></div>
+      <button class="palette-expand icon-button" aria-label="Действия с ниткой ${escapeHtml(color.code)}" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button><small class="palette-counts"><span>${formatStitches(total)} · ${formatSkeins(skeinCount)}</span><span>вышито ${formatNumber(completed)}</span></small><div class="palette-actions"><button class="button secondary" data-action="highlight">${ru.highlight}</button><button class="button secondary" data-action="exclude">${ru.missingColor}</button><button class="button secondary" data-action="replace">${ru.replace}</button>
       <select aria-label="Похожие оттенки для ${escapeHtml(color.code)}" class="replace-select"><option value="">Похожий цвет DMC…</option>${suggestions.map((item) => `<option value="${item.code}">${item.code} ${escapeHtml(item.name)}</option>`).join("")}</select><input class="replace-search" list="dmc-options" placeholder="Код или название…" aria-label="Поиск цвета DMC"></div></article>`;
     })
     .join("");
@@ -49,7 +52,10 @@ export function renderPalette(pattern, { checked, onAction, skeins }) {
   if (!dialog) { dialog = document.createElement("dialog"); dialog.id = "replace-dialog"; document.body.append(dialog); }
   list.onclick = async (event) => {
     const rowTap = event.target.closest(".palette-row");
-    if (rowTap && !event.target.closest("[data-action]")) rowTap.classList.toggle("selected");
+    if (rowTap && !event.target.closest("[data-action], select, input")) {
+      rowTap.classList.toggle("selected");
+      rowTap.querySelector(".palette-expand").setAttribute("aria-expanded", String(rowTap.classList.contains("selected")));
+    }
     const button = event.target.closest("[data-action]");
     if (!button) return;
     const row = button.closest("[data-code]");

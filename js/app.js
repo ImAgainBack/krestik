@@ -56,6 +56,11 @@ let activeScreen = "home";
 let handlingHistory = false;
 function renderScreen(screen) {
   activeScreen = screen;
+  $$(".bottom-nav a,.bottom-nav button").forEach(element => {
+    const target = element.id === "nav-stitch" ? "stitch" : element.id === "nav-create" ? "wizard" : element.hash?.slice(1);
+    if (target === screen) element.setAttribute("aria-current", "page");
+    else element.removeAttribute("aria-current");
+  });
   $$(".screen").forEach((element) =>
     element.classList.toggle("hidden", element.id !== `${screen}-screen`),
   );

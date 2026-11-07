@@ -10,8 +10,8 @@ export function renderProjects(projects, { open, save, remove }) {
     const total = cells.reduce((count, value) => count + (value === 0xffff ? 0 : 1), 0);
     const done = [...checked].filter((index) => Number.isInteger(index) && index >= 0 && index < cells.length && cells[index] !== 0xffff).length;
     const value = total ? (done / total) * 100 : 0;
-    const percent = formatNumber(value, { minimumFractionDigits: value < 10 ? 1 : 0, maximumFractionDigits: 1 });
-    return `<article class="project-card" data-id="${escapeHtml(project.id)}" tabindex="0" role="button" aria-label="Открыть вышивку ${escapeHtml(project.name)}"><img src="${project.thumbnail || ""}" alt="Схема ${escapeHtml(project.name)}"><div class="project-info"><strong>${escapeHtml(project.name)}</strong><small>${percent} % готово · ${formatStitches(total)}</small></div><div class="project-actions"><button class="menu-button" data-action="menu" aria-label="Дополнительные действия" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div></article>`;
+    const percent = formatNumber(Math.round(value));
+    return `<article class="project-card" data-id="${escapeHtml(project.id)}" tabindex="0" role="button" aria-label="Открыть вышивку ${escapeHtml(project.name)}"><img src="${project.thumbnail || ""}" alt="Схема ${escapeHtml(project.name)}"><div class="project-info"><strong>${escapeHtml(project.name)}</strong><small>${formatStitches(total)}</small><div class="project-progress"><span style="width:${value}%"></span></div><small>${done ? `${percent} % готово` : "Не начата"}</small></div><div class="project-actions"><button class="menu-button" data-action="menu" aria-label="Дополнительные действия" aria-haspopup="dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div></article>`;
   }).join("");
   $("#project-count").textContent = formatSchemes(projects.length);
   $("#empty-state").classList.toggle("hidden", projects.length > 0);

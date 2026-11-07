@@ -44,10 +44,10 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
     $("#size-summary").textContent = `${formatNumber(Number(cols.value))} × ${formatNumber(Number(rows.value))} крестиков · примерно ${format.format((Number(cols.value) / n) * 2.54)} × ${format.format((Number(rows.value) / n) * 2.54)} см`;
     const cm = (Number(cols.value) / n) * 2.54;
     const closestSize = [10, 20, 30].reduce((best, item) => Math.abs(item - cm) < Math.abs(best - cm) ? item : best, 10);
-    $$("#photo-size-options [data-size]").forEach((button) => button.classList.toggle("active", Number(button.dataset.size) === closestSize));
+    $$("#photo-size-options [data-size]").forEach((button) => { const active = Number(button.dataset.size) === closestSize; button.classList.toggle("active", active); button.setAttribute("aria-pressed", String(active)); });
     const colors = Number($("#max-colors").value);
     const closestColors = [10, 20, 35].reduce((best, item) => Math.abs(item - colors) < Math.abs(best - colors) ? item : best, 10);
-    $$("#color-options [data-colors]").forEach((button) => button.classList.toggle("active", Number(button.dataset.colors) === closestColors));
+    $$("#color-options [data-colors]").forEach((button) => { const active = Number(button.dataset.colors) === closestColors; button.classList.toggle("active", active); button.setAttribute("aria-pressed", String(active)); });
     $("#stitch-count").textContent = formatStitches(Number(cols.value) * Number(rows.value));
   }
   function ratio() {
@@ -69,15 +69,17 @@ export function setupSettings({ getImage, getQuad, getOptions, calculate }) {
         const pattern = await calculate(getImage(), getOptions());
         if (current !== version) return;
         $("#create-pattern").disabled = false;
-        $("#preview-summary").textContent = `Схема: ${formatNumber(pattern.cols)} × ${formatNumber(pattern.rows)} крестиков · ${formatNumber(pattern.colors.length)} цветов`;
+        $("#preview-summary").textContent = "";
         const canvas = $("#preview-canvas"), context = canvas.getContext("2d");
         const scale = Math.min(240 / pattern.cols, 240 / pattern.rows);
         canvas.width = Math.max(1, Math.round(pattern.cols * scale)); canvas.height = Math.max(1, Math.round(pattern.rows * scale));
+        const paper = getComputedStyle(document.documentElement).getPropertyValue("--paper");
         for (let y=0;y<pattern.rows;y++) for(let x=0;x<pattern.cols;x++) {
           const color = pattern.cells[y*pattern.cols+x] === 0xffff ? null : pattern.colors[pattern.cells[y*pattern.cols+x]];
-          context.fillStyle = color ? (color.hex.startsWith("#") ? color.hex : `#${color.hex}`) : "#f4f1e9";
+          context.fillStyle = color ? (color.hex.startsWith("#") ? color.hex : `#${color.hex}`) : paper;
           context.fillRect(x*scale,y*scale,Math.ceil(scale),Math.ceil(scale));
         }
+        $("#preview-color-count").textContent = `${formatNumber(pattern.colors.length)} цветов`;
         $("#preview-palette").innerHTML = pattern.colors.map(c => `<span title="${c.code} · ${c.name}" style="background:${c.hex.startsWith("#")?c.hex:`#${c.hex}`}"></span>`).join("");
       } catch { if (current === version) { $("#preview-summary").textContent = "Не удалось подготовить схему. Проверьте настройки."; $("#create-pattern").disabled = false; } }
     }, 250);

@@ -7,11 +7,11 @@ const same = (a, b) => String(a) === String(b);
 export function createPdfDialog(onSave) {
   const dialog = document.createElement("dialog");
   dialog.id = "pdf-dialog";
-  dialog.innerHTML = `<header><button class="button secondary" id="close-pdf" aria-label="Назад">←</button><h2>PDF схемы</h2></header>
+  dialog.innerHTML = `<header><button class="back-button icon-button" id="close-pdf" aria-label="Назад"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 4-8 8 8 8"/></svg></button><h2>PDF схемы</h2></header>
     <div id="pdf-strip" aria-label="Листы схемы"></div><p id="pdf-counter" aria-live="polite"></p><div id="pdf-dots"></div>
-    <fieldset><legend>Сколько листов</legend><div id="pdf-pages-options"></div><p id="pdf-cell-hint"></p></fieldset>
+    <fieldset><legend>Сколько листов</legend><div id="pdf-pages-options"></div><div class="pdf-hint"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/></svg><p id="pdf-cell-hint"></p></div></fieldset>
     <fieldset><legend>Как печатать</legend><div class="pdf-modes"><button class="pdf-option" data-mode="color"><b>Цветная</b></button><button class="pdf-option" data-mode="symbols"><b>Значки ч/б</b></button></div></fieldset>
-    <div class="pdf-actions"><button class="button primary" id="pdf-save">Сохранить PDF</button><button class="button secondary" id="pdf-print">Печать</button></div><p id="pdf-file"></p><p id="pdf-error" role="alert"></p>`;
+    <p id="pdf-file"></p><p id="pdf-error" role="alert"></p><div class="pdf-actions"><button class="button primary" id="pdf-save">Сохранить PDF</button><button class="button secondary" id="pdf-print">Печать</button></div>`;
   document.body.append(dialog);
   const zoom = document.createElement("dialog");
   zoom.id = "pdf-zoom";

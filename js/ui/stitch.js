@@ -90,8 +90,8 @@ export function createStitchView({ save, getSkeins }) {
       width,
       height,
       size,
-      left: (width - size * project.pattern.cols) / 2 + panX,
-      top: (height - size * project.pattern.rows) / 2 + panY,
+      left: 40 + (width - 48 - size * project.pattern.cols) / 2 + panX,
+      top: 32 + panY,
     };
   }
   function draw() {
@@ -105,10 +105,12 @@ export function createStitchView({ save, getSkeins }) {
     panY = Math.max(-boundY, Math.min(boundY, panY));
   }
   function zoomAt(next, x, y) {
-    const before = zoom, base = geometry().size / zoom;
+    const before = geometry(), base = before.size / zoom;
+    const previousZoom = zoom;
     zoom = Math.max(1, Math.min(Math.max(1, 56 / base), next));
-    panX = x - canvas.clientWidth / 2 - (x - canvas.clientWidth / 2 - panX) * zoom / before;
-    panY = y - canvas.clientHeight / 2 - (y - canvas.clientHeight / 2 - panY) * zoom / before;
+    const after = geometry();
+    panX += x - after.left - (x - before.left) * zoom / previousZoom;
+    panY += y - after.top - (y - before.top) * zoom / previousZoom;
     boundPan(); draw();
   }
   function render() {
@@ -128,19 +130,19 @@ export function createStitchView({ save, getSkeins }) {
       canvas.height = Math.round(height * dpr);
     }
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
-    context.fillStyle = "#fffdf8";
+    context.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--paper");
     context.fillRect(0, 0, width, height);
     const { size, left, top } = geometry();
     context.save();
     context.beginPath();
-    context.rect(28, 24, width - 30, height - 26);
+    context.rect(40, 32, width - 40, height - 32);
     context.clip();
-    const firstCol = Math.max(0, Math.floor((28 - left) / size));
+    const firstCol = Math.max(0, Math.floor((40 - left) / size));
     const lastCol = Math.min(
       project.pattern.cols,
       Math.ceil((width - left) / size),
     );
-    const firstRow = Math.max(0, Math.floor((24 - top) / size));
+    const firstRow = Math.max(0, Math.floor((32 - top) / size));
     const lastRow = Math.min(
       project.pattern.rows,
       Math.ceil((height - top) / size),
@@ -201,21 +203,29 @@ export function createStitchView({ save, getSkeins }) {
       context.stroke();
     }
     context.restore();
-    context.fillStyle = "#6d6b60";
-    context.font = "12px sans-serif";
+    // Rulers follow the grid, then stick to the viewport. Partial labels are skipped.
+    context.font = `500 13px ${getComputedStyle(document.body).fontFamily}`;
     context.textAlign = "center";
-    for (let col = Math.max(10, Math.ceil(firstCol / 10) * 10); col <= Math.min(project.pattern.cols, lastCol); col += 10) {
-      const rawX = left + (col - 0.5) * size;
-      if (rawX + 18 < 28 || rawX - 18 > width) continue;
-      context.textAlign = rawX < 46 ? "left" : rawX > width - 46 ? "right" : "center";
-      context.fillText(String(col), Math.max(28 + 2, Math.min(width - 2, rawX)), 15);
+    context.textBaseline = "middle";
+    const labelWidth = context.measureText("000").width;
+    const step = [10, 20, 50, 100].find(value => value * size >= labelWidth + 8) || 100;
+    const rulerX = Math.max(0, left - 40), rulerY = Math.max(0, top - 32);
+    const theme = getComputedStyle(document.documentElement);
+    context.fillStyle = theme.getPropertyValue("--card");
+    if (rulerX + 40 <= width && rulerY + 32 <= height) context.fillRect(rulerX, rulerY, 40, 32);
+    context.fillRect(Math.max(40, left), rulerY, Math.max(0, Math.min(width, left + project.pattern.cols * size) - Math.max(40, left)), 32);
+    context.fillRect(rulerX, Math.max(32, top), 40, Math.max(0, Math.min(height, top + project.pattern.rows * size) - Math.max(32, top)));
+    context.fillStyle = theme.getPropertyValue("--muted");
+    for (let col = Math.max(step, Math.ceil(firstCol / step) * step); col <= Math.min(project.pattern.cols, lastCol); col += step) {
+      const x = left + (col - .5) * size;
+      const half = context.measureText(String(col)).width / 2;
+      if (x - half < Math.max(40, left) || x + half > width || rulerY + 32 > height) continue;
+      context.fillText(String(col), x, rulerY + 16);
     }
-    context.textAlign = "center";
-    for (let row = Math.max(10, Math.ceil(firstRow / 10) * 10); row <= Math.min(project.pattern.rows, lastRow); row += 10) {
-      const rawY = top + (row - 0.5) * size + 4;
-      if (rawY + 8 < 24 || rawY - 8 > height) continue;
-      context.textBaseline = "middle";
-      context.fillText(String(row), 15, Math.max(25, Math.min(height - 2, rawY)));
+    for (let row = Math.max(step, Math.ceil(firstRow / step) * step); row <= Math.min(project.pattern.rows, lastRow); row += step) {
+      const y = top + (row - .5) * size;
+      if (y - 7 < Math.max(32, top) || y + 7 > height || rulerX + 40 > width) continue;
+      context.fillText(String(row), rulerX + 20, y);
     }
     updateProgress();
   }
@@ -371,8 +381,21 @@ export function createStitchView({ save, getSkeins }) {
     const p = pointOf(event);
     zoomAt(zoom*Math.exp(-event.deltaY*.002), p.x, p.y);
   }, {passive:false});
-  $("#zoom-in").addEventListener('click', () => zoomAt(zoom*1.4,canvas.clientWidth/2,canvas.clientHeight/2));
-  $("#zoom-out").addEventListener('click', () => zoomAt(zoom/1.4,canvas.clientWidth/2,canvas.clientHeight/2));
+  // Repeated −/+ presses keep the same screen anchor until the view is moved another way.
+  let buttonAnchor = null;
+  function zoomVisibleGrid(next) {
+    if (!buttonAnchor || buttonAnchor.zoom !== zoom || buttonAnchor.panX !== panX || buttonAnchor.panY !== panY) {
+      const g = geometry();
+      buttonAnchor = {
+        x: (Math.max(40, g.left) + Math.min(g.width, g.left + project.pattern.cols * g.size)) / 2,
+        y: (Math.max(32, g.top) + Math.min(g.height, g.top + project.pattern.rows * g.size)) / 2,
+      };
+    }
+    zoomAt(next, buttonAnchor.x, buttonAnchor.y);
+    Object.assign(buttonAnchor, { zoom, panX, panY });
+  }
+  $("#zoom-in").addEventListener('click', () => zoomVisibleGrid(zoom * 1.4));
+  $("#zoom-out").addEventListener('click', () => zoomVisibleGrid(zoom / 1.4));
   $("#zoom-fit").addEventListener('click', () => {zoom=1;panX=panY=0;draw();});
   $("#check-toggle").addEventListener("click", () => setCheckMode(!$("#check-toggle").classList.contains("active")));
   function openOverlay({ fromHistory = false } = {}) {
