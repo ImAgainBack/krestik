@@ -66,13 +66,16 @@ export function createStitchView({ save, getSkeins }) {
     const whiteContrast = 1.05 / (luminance + 0.05);
     return blackContrast >= whiteContrast ? "#000" : "#fff";
   }
+  let checkHintTimer = 0;
   function setCheckMode(active) {
     const button = $("#check-toggle");
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
     button.setAttribute("aria-checked", String(active));
     button.querySelector("small").textContent = stitchRu.paint;
+    clearTimeout(checkHintTimer);
     $("#check-hint").classList.toggle("hidden", !active);
+    if (active) checkHintTimer = setTimeout(() => $("#check-hint").classList.add("hidden"), 4000);
   }
 
   function geometry() {
